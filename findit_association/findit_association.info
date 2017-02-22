@@ -1,0 +1,16 @@
+name = Findit Association
+description = Association interface for merchants and findit user.
+core = 7.x
+package = Findit
+dependencies[] = commerce_product
+dependencies[] = taxonomy
+dependencies[] = commerce_marketplace
+dependencies[] = chosen
+dependencies[] = features
+dependencies[] = eck
+dependencies[] = findit_product_categories
+dependencies[] = findit_commerce_products
+dependencies[] = findit_store_management
+dependencies[] = product_association_entity
+stylesheets[all][] = webroot/css/association.css
+scripts[] = webroot/js/association.js

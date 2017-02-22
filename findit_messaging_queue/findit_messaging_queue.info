@@ -1,0 +1,4 @@
+name = Findit Messaging Queue
+description = Rabbitmq integration for messaging queue implementation
+core = 7.x
+package = Findit Custom API Modules

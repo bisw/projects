@@ -1,0 +1,15 @@
+.sticky-cbuttons {
+    position: fixed;
+    top: -17px;
+    z-index : 99
+}
+
+.loading {
+    width: 16px;
+    height: 16px;
+    background: url(../images/process.gif) no-repeat center center;
+    transition: all .5s ease-in-out;
+    float: right;
+    margin: 6px 415px 0 0;
+    display: none;
+}

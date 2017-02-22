@@ -1,0 +1,4 @@
+name = Findit Reply
+description = This module exends functionality of Review & Rating.
+core = 7.x
+package = Findit

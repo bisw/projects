@@ -1,0 +1,263 @@
+<?php
+
+module_load_include('inc', 'expr_eng_migration', 'includes/expr_eng_migration.expression');
+
+/**
+ * Implementation of hook_menu().
+ */
+function expr_eng_migration_menu() {
+
+  $items['admin/config/expr_eng_migration'] = array(
+    'title' => 'Config Update',
+    'description' => 'Update content type, fields, vocabulary, terms etc.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('expr_eng_migration_get_config_migration_form'),
+    'access arguments' => array('access administration pages'),
+    'type' => MENU_NORMAL_ITEM,
+    'file' => 'includes/expr_eng_migration.inc'
+  );
+  $items['admin/content/expr_eng_migration'] = array(
+    'title' => 'Content Update',
+    'description' => 'Update content, files',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('expr_eng_migration_update_content_form'),
+    'access arguments' => array('access administration pages'),
+    'type' => MENU_LOCAL_TASK,
+    'file' => 'includes/expr_eng_migration.inc'
+  );
+
+  return $items;
+}
+
+/**
+ * Callback function to create base fields.
+ * 
+ * @param Array $fields
+ *   List of fields data.
+ */
+function expr_eng_migration_create_base_fields($fields) {
+  try{  
+    foreach($fields as $fieldKey => $fieldVal) {
+      if(!db_table_exists('field_data_' . $fieldVal['field_name'])) {
+        $field = array(
+          'field_name' => $fieldVal['field_name'],
+          'type' => $fieldVal['type'],
+        );
+        field_create_field($field);
+      }
+    }
+    return TRUE;
+  }
+  catch (Exception $ex) {
+    watchdog(
+      'expr_eng_migration', 'Base field creation exception in %function() @trace',
+      array('%function' => __FUNCTION__, '@trace' => $ex->getTraceAsString()), WATCHDOG_ERROR
+    ); 
+    return FALSE;
+  }
+}
+
+function expr_eng_create_migration_content_type($data) {
+  try{
+    $nodeTypes = node_type_get_types();
+    if(!in_array($data['channel_name'], $nodeTypes)) {
+      $typeData = array(
+        'type' => $data['channel_name'],
+        'name' => t($data['channel_title']),
+        'base' => 'node_content',
+        'description' => t($data['channel_description']),
+        'custom' => 1,
+        'modified' => 1,
+        'locked' => 0,
+      );
+
+      $type = node_type_set_defaults($typeData);
+      node_type_save($type);
+      node_add_body_field($type);
+      return TRUE;
+    }
+    return FALSE;
+  }
+  catch (Exception $ex) {
+    watchdog(
+      'expr_eng_migration', 'Content type creation exception in %function() @trace',
+      array('%function' => __FUNCTION__, '@trace' => $ex->getTraceAsString()), WATCHDOG_ERROR
+    ); 
+    return FALSE;
+  }
+}
+
+function expr_eng_create_migration_field_instance($fields, $contentType) {   
+  try{  
+    foreach($fields as $field) {   
+      if(!field_info_instance('node', $field['field_name'], $contentType['channel_name'])) {        
+        if($field['group_id'] == $contentType['field_group']) {
+          $instance = array(
+            'field_name' => $field['field_name'], 
+            'entity_type' => 'node', 
+            'label' => $field['field_label'],
+            'bundle' => $contentType['channel_name'],
+            'required' => TRUE,
+            'settings' => array(
+            )
+          );
+          field_create_instance($instance);
+        }  
+      }
+    }
+    return TRUE;
+  }
+  catch (Exception $ex) {
+    watchdog(
+      'expr_eng_migration', 'Field instance creation exception in %function() @trace',
+      array('%function' => __FUNCTION__, '@trace' => $ex->getTraceAsString()), WATCHDOG_ERROR
+    ); 
+    return FALSE;
+  }
+}
+
+function expr_eng_migration_create_vocabulary($datus) { 
+  try{  
+    foreach ($datus as $data) {  
+      $machineName = str_replace(' ', '_', drupal_strtolower($data['group_name']));
+  
+      if(!_expr_eng_migration_check_vocabulary_exists($machineName)) {
+        $vocabulary = new stdClass();
+        $vocabulary->name = $data['group_name'];
+        $vocabulary->machine_name = $machineName;
+        $vocabulary->module = 'taxonomy';
+        taxonomy_vocabulary_save($vocabulary);
+      }
+    }
+    return TRUE;
+  }
+  catch (Exception $ex) {
+    watchdog(
+      'expr_eng_migration', 'CVocabulary creation exception in %function() @trace',
+      array('%function' => __FUNCTION__, '@trace' => $ex->getTraceAsString()), WATCHDOG_ERROR
+    ); 
+    return FALSE;
+  }
+}
+
+function expr_eng_migration_create_taxonomy_term($datus, $categories) {
+  try{  
+    foreach ($datus as $data) {
+      if(!_expr_eng_migration_check_term_exists($data['cat_name'])) {
+        $voca = _expr_eng_migration_check_vocabulary_exists($categories[$data['group_id']]);
+        $term = new stdClass();
+        $term->name = $data['cat_name'];
+        $term->vid = isset($voca) ? $voca : 1;
+        taxonomy_term_save($term);
+      }
+    }
+    return TRUE;
+  }
+  catch (Exception $ex) {
+    watchdog(
+      'expr_eng_migration', 'Taxonomy term creation exception in %function() @trace',
+      array('%function' => __FUNCTION__, '@trace' => $ex->getTraceAsString()), WATCHDOG_ERROR
+    ); 
+    return FALSE;
+  }
+}
+
+function expr_eng_migration_create_node($nodes) {
+  try{  
+    global $user;
+    foreach($nodes as $key => $nodeVal) {
+      $node = new stdClass();
+      $node->title = $nodeVal['title'];    
+      $node->type = $nodeVal['channel_name'];
+      node_object_prepare($node);
+    
+      $nodeFields = expr_eng_migration_prepare_for_node_creation($nodeVal);
+      $node = (object) array_merge((array) $node, $nodeFields);
+      $node->language = 'en';
+      $node->uid = $user->uid; 
+      $node->status = 1;
+      $node->promote = 0;
+      $parFields[] = array(
+        'name' => 'field_blog_test1',
+        'value' => 'field_blog_test1test'
+      );
+      $parFields[] = array(
+        'name' => 'field_blog_test2',
+        'value' => 'field_blog_test2testdsds'
+      );
+      $node = node_submit($node);
+      node_save($node);
+      if($nodeVal['channel_name'] == 'blog') {
+        expr_eng_migration_create_paragraph_item($node, 'test', 'field_blog_test', $parFields);
+      }
+    }
+    return TRUE;
+  }
+  catch (Exception $ex) {
+    watchdog(
+      'expr_eng_migration', 'Node creation exception in %function() @trace',
+      array('%function' => __FUNCTION__, '@trace' => $ex->getTraceAsString()), WATCHDOG_ERROR
+    ); 
+    return FALSE;
+  }
+}
+
+function expr_eng_migration_create_paragraph_item($node, $bundleName, $refField, $fields) {
+  try{ 
+    $entity = entity_create('paragraphs_item', array('field_name' => $refField, 'bundle' => $bundleName));
+    $entity->setHostEntity('node', $node);
+    foreach($fields as $field) {
+      $entity->{$field['name']}[LANGUAGE_NONE][0]['value'] = $field['value']; 
+    }
+    $entity->save();
+  }
+  catch (Exception $ex) {
+    watchdog(
+      'expr_eng_migration', 'Paragraph item creation exception in %function() @trace',
+      array('%function' => __FUNCTION__, '@trace' => $ex->getTraceAsString()), WATCHDOG_ERROR
+    );
+    return FALSE;
+  }
+}
+
+function _expr_eng_migration_check_vocabulary_exists($vocaName) {
+  $data = NULL;
+  $vocaQuery = db_select('taxonomy_vocabulary', 'voca');
+  $vocaQuery->fields('voca', array('vid'))
+    ->condition('machine_name', $vocaName);
+  $vocaResult = $vocaQuery->execute()->fetchField();
+  return $vocaResult;
+}
+
+function _expr_eng_migration_check_term_exists($term) {
+  $data = NULL;
+  $termQuery = db_select('taxonomy_term_data', 'term');
+  $termQuery->fields('term', array('tid'))
+    ->condition('name', $term);
+  $termResult = $termQuery->execute()->fetchField();
+  return $termResult;
+}
+
+function expr_eng_migration_set_field_value($node) {
+  $field_ids = expr_eng_migration_fetch_field_ids();
+  foreach($field_ids as $fieldKey => $field) {
+    if(!empty($node['field_id_'.$fieldKey])) {  
+      $node[$field] = $node['field_id_'.$fieldKey];
+    }
+    unset($node['field_id_'.$fieldKey]);
+    unset($node['field_ft_'.$fieldKey]);
+  }
+  return $node;
+}
+
+function expr_eng_migration_prepare_for_node_creation($node) {
+  $nodeFileds = array();
+  $nonFields = array('entry_id', 'site_id', 'channel_id', 'channel_name', 'channel_title', 'title'); 
+   
+  foreach($node as $key => $field) {
+    if(!in_array($key, $nonFields)) {
+      $nodeFileds[$key][LANGUAGE_NONE][0]['value'] = $field;
+    }
+  }
+  return $nodeFileds;
+}

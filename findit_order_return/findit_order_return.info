@@ -1,0 +1,5 @@
+name = Findit order return
+description = This module exends functionality of commerce RMA
+core = 7.x
+package = Findit-Marketplace
+dependencies[] = commerce_rma

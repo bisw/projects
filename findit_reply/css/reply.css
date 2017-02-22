@@ -1,0 +1,67 @@
+.review-img-wrap {
+    float: left;
+    width: 20%;
+
+}
+.review-img-wrap img{
+    max-width: 100%;
+}
+.review-body-wrap {
+    float: right;
+    width: 78%;
+}
+
+#rating-review-block img {
+    height: 50px;
+    width: 50px;
+}
+
+#rating-review-block li {
+    display: inline-block;
+    width: 100%;
+}
+
+.review-stars {
+    float: left;
+    margin: 1em;
+}
+
+.review-date {
+    float: left;
+}
+
+.review-toggle-section div {
+    float: left;
+    margin: 1em;
+}
+
+.reply-toggle-section div {
+    float: left;
+    margin: 1em;
+}
+
+// For review
+
+
+.review-img-wrap img{
+  max-width:100%;
+}
+.review-img-wrap ul{
+ list-style-type:none;
+}
+
+//for read more in comments
+.morecontent span {
+ display: none;
+}
+.morelink {
+    display: inline-block;
+}
+
+.morecontent {
+    display: none;
+}
+.moreellipses {
+    display: inline;
+}
+

@@ -1,0 +1,438 @@
+<?php
+
+/**
+ * @file
+ * Module file for findit inventory rules module.
+ */
+
+/**
+ * Implements hook_menu().
+ */
+function findit_inventory_rules_menu() {
+  $items = array();
+  $items['findit-inventory-rules'] = array(
+    'title' => 'Findit Inventory Rules Interface',
+    'description' => 'Callback for returning inventory rules tree structure in json format.',
+    'page callback' => "findit_inventory_rules_json",
+    'type' => MENU_CALLBACK,
+    'access arguments' => array('inventory view access'),
+    'file' => 'includes/findit_inventory_rules.admin.inc',
+  );
+  $items['findit-inventory-rule-email'] = array(
+    'title' => 'Findit Mails Group for Global Inventory Rule',
+    'description' => 'Autocomplete callback for emails groups.',
+    'page callback' => "findit_inventory_mail_groups_json",
+    'type' => MENU_CALLBACK,
+    'access arguments' => array('inventory view access'),
+    'file' => 'includes/findit_inventory_rules.admin.inc',
+  );
+  $items['inventory-rule/update/default'] = array(
+    'title' => 'Add Global Inventory Rules',
+    'description' => 'A form to set findit inventory rule.',
+    'page callback' => "drupal_get_form",
+    'page arguments' => array("findit_inventory_update_global"),
+    'type' => MENU_CALLBACK,
+    'access arguments' => array('inventory update access'),
+    'file' => 'includes/findit_inventory_rules.admin.inc',
+  );
+  $items['user/%user/inventory-rules'] = array(
+    'title' => 'Findit Inventory Rules Interface',
+    'description' => 'A form to set findit inventory rule.',
+    'page callback' => "findit_inventory_rules_interface",
+    'type' => MENU_LOCAL_TASK,
+    'access arguments' => array('inventory update access'),
+    'file' => 'includes/findit_inventory_rules.admin.inc',
+  );
+  $items['product-seller/acl/search'] = array(
+    'title' => 'Search Product/SKU',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('findit_default_seller_acl_search_form'),
+    'access arguments' => array('view default seller by acl'),
+    'file' => 'includes/findit_inventory_rules.admin.inc',
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_permission().
+ *
+ */
+function findit_inventory_rules_permission() {
+  return array(
+    'inventory update access' => array(
+      'title' => t('Inventory update access'),
+      'description' => t('Perform inventory update actions.'),
+    ),
+    'inventory view access' => array(
+      'title' => t('Inventory view access'),
+      'description' => t('Perform inventory view actions.'),
+    ),
+    'view default seller by acl' => array(
+      'title' => t('View Default Seller by ACL based permissions'),
+      'description' => t('Access to view default seller via ACL'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_cron_queue_info().
+ */
+function findit_inventory_rules_cron_queue_info() {
+  // This is the callback function for each queue item.
+  // This is the max run time per cron run in seconds.
+  $queues['categories_soft_limit'] = array(
+    'worker callback' => 'categories_soft_limit_email',
+    'skip on cron' => TRUE,
+    'time' => 1500,
+  );
+  $queues['categories_hard_limit'] = array(
+    'worker callback' => 'categories_hard_limit_email',
+    'skip on cron' => TRUE,
+    'time' => 1500,
+  );
+  return $queues;
+}
+
+/**
+ * Implements hook_cronapi().
+ */
+function findit_inventory_rules_cronapi($op, $job = NULL) {
+  $items['inventory_soft_limit_email'] = array(
+    'description' => 'Send mail for inventory soft limit reached.',
+    // Daily.
+    'rule' => '59 23 * * *',
+  );
+  $items['inventory_hard_limit_email'] = array(
+    'description' => 'Send mail for inventory hard limit reached.',
+    // Daily.
+    'rule' => '59 23 * * *',
+  );
+  return $items;
+}
+
+/**
+ * Function for getting all the tids of the given vocab.
+ */
+function findit_get_tids($vocab_name) {
+  $query = db_select('taxonomy_term_data', 'td');
+  $query->join('taxonomy_vocabulary', 'tv', 'td.vid=tv.vid');
+  $query->condition('tv.machine_name', $vocab_name);
+  $query->fields('td', array('tid'));
+  return $query->execute()->fetchCol();
+}
+
+/**
+ * Function for getting all the terms having child terms for a given vocab.
+ */
+function findit_get_tids_with_child_terms($vocab_name) {
+  $query = db_select('taxonomy_term_hierarchy', 'th');
+  $query->join('taxonomy_term_data', 'td', 'td.tid=th.tid');
+  $query->join('taxonomy_vocabulary', 'tv', 'td.vid=tv.vid');
+  $query->condition('tv.machine_name', $vocab_name);
+  $query->addExpression('DISTINCT(th.parent)');
+  return $query->execute()->fetchCol();
+}
+
+/**
+ * Callback function for inventory going below soft limit email.
+ */
+function inventory_soft_limit_email() {
+  // Put everything in a queue for processing.
+  $queue = DrupalQueue::get('categories_soft_limit');
+  // Get all skus for which inventory caps are set.
+  $categories = findit_get_child_level_categories();
+  foreach ($categories as $category) {
+    $queue->createItem($category);
+  }
+
+  // Grab the defined cron queues.
+  $queues = module_invoke_all('cron_queue_info');
+  drupal_alter('cron_queue_info', $queues);
+  $info = $queues['categories_soft_limit'];
+  $function = $info['worker callback'];
+  $end = time() + (isset($info['time']) ? $info['time'] : 15);
+  $queue = DrupalQueue::get('categories_soft_limit');
+  while (time() < $end && ($item = $queue->claimItem())) {
+    $function($item->data);
+    $queue->deleteItem($item);
+  }
+}
+
+/**
+ * Function for sending category soft limit depletion email.
+ */
+function categories_soft_limit_email($category) {
+  $from = variable_get('site_mail', ini_get('sendmail_from'));
+  $pet = pet_load('inventory_soft_limit_email');
+  $params = array();
+  $params['pet_from'] = $from;
+  $inventory_rules = findit_get_inventory_rules_category($category);
+  $inventory_count = findit_products_inventory_count($category, $inventory_rules['inventory_rule_soft_limit']);
+  if (!empty($inventory_count)) {
+    $email_ids = findit_inventory_get_email_ids_of_group($inventory_rules['email_group']);
+    $params['pet_to'] = implode(',', $email_ids);
+    $params['inventoy_cat_id'] = $category;
+    $params['inventoy_soft_limit'] = $inventory_rules['inventory_rule_soft_limit'];
+    $params['inventoy_hard_limit'] = $inventory_rules['inventory_rule_hard_limit'];
+    // Send e-mail.
+    pet_send_one_mail($pet, $params);
+  }
+}
+
+/**
+ * Callback function for inventory going below soft limit email.
+ */
+function inventory_hard_limit_email() {
+  // Put everything in a queue for processing.
+  $queue = DrupalQueue::get('categories_hard_limit');
+  // Get all skus for which inventory caps are set.
+  $categories = findit_get_child_level_categories();
+  foreach ($categories as $category) {
+    $queue->createItem($category);
+  }
+
+  // Grab the defined cron queues.
+  $queues = module_invoke_all('cron_queue_info');
+  drupal_alter('cron_queue_info', $queues);
+  $info = $queues['categories_hard_limit'];
+  $function = $info['worker callback'];
+  $end = time() + (isset($info['time']) ? $info['time'] : 15);
+  $queue = DrupalQueue::get('categories_hard_limit');
+  while (time() < $end && ($item = $queue->claimItem())) {
+    $function($item->data);
+    $queue->deleteItem($item);
+  }
+}
+
+/**
+ * Function for sending category soft limit depletion email.
+ */
+function categories_hard_limit_email($category) {
+  $from = variable_get('site_mail', ini_get('sendmail_from'));
+  $pet = pet_load('inventory_hard_limit_email');
+  $params = array();
+  $params['pet_from'] = $from;
+  $inventory_rules = findit_get_inventory_rules_category($category);
+  $inventory_count = findit_products_inventory_count($category, $inventory_rules['inventory_rule_hard_limit']);
+  if (!empty($inventory_count)) {
+    $email_ids = findit_inventory_get_email_ids_of_group($inventory_rules['email_group']);
+    $params['pet_to'] = implode(',', $email_ids);
+    $params['inventoy_cat_id'] = $category;
+    $params['inventoy_soft_limit'] = $inventory_rules['inventory_rule_soft_limit'];
+    $params['inventoy_hard_limit'] = $inventory_rules['inventory_rule_hard_limit'];
+    // Send e-mail.
+    pet_send_one_mail($pet, $params);
+  }
+}
+
+/**
+ * Function for sending mail for inventory rules.
+ */
+function findit_get_child_level_categories() {
+  // Get tids of all the terms of category taxonomy.
+  $category_tids = findit_get_tids(FINDIT_PRODUCT_CATEGORY);
+  $category_tids_with_child = findit_get_tids_with_child_terms(FINDIT_PRODUCT_CATEGORY);
+  $child_level_categories = array_diff($category_tids, $category_tids_with_child);
+  return $child_level_categories;
+}
+
+/**
+ * Implements hook_token_info().
+ */
+function findit_inventory_rules_token_info() {
+  $info = array();
+  $info['types']['inventory_rules'] = array(
+    'name' => t('Inventory Rules'),
+    'description' => t('Tokens related to inventory rules.'),
+  );
+  // Token for pending orders table.
+  $info['tokens']['inventory_rules']['category_name'] = array(
+    'name' => t('Category name'),
+    'description' => t('Names of the category for which has reached soft or hard limit.'),
+  );
+  $info['tokens']['inventory_rules']['category_names_soft_limit'] = array(
+    'name' => t('Soft limit'),
+    'description' => t('Soft limit that is set on the category.'),
+  );
+  $info['tokens']['inventory_rules']['category_names_hard_limit'] = array(
+    'name' => t('Hard limit'),
+    'description' => t('Hard limit that is set on the category.'),
+  );
+  $info['tokens']['inventory_rules']['products_summary_soft_limit'] = array(
+    'name' => t('Categories Summary of Inventory Rules'),
+    'description' => t('Summary of categories reached limit specified as soft or hard limit.'),
+  );
+  $info['tokens']['inventory_rules']['products_summary_hard_limit'] = array(
+    'name' => t('Categories Summary of Inventory Rules'),
+    'description' => t('Summary of categories reached limit specified as soft or hard limit.'),
+  );
+  return $info;
+}
+
+/**
+ * Implements hook_pet_substitutions_alter().
+ */
+function findit_inventory_rules_pet_substitutions_alter(&$substitutions, $params) {
+  $substitutions['inventory-cat-id'] = $params['inventoy_cat_id'];
+  $substitutions['inventory-soft-limit'] = $params['inventoy_soft_limit'];
+  $substitutions['inventory-hard-limit'] = $params['inventoy_hard_limit'];
+}
+
+/**
+ * Implements hook_tokens().
+ */
+function findit_inventory_rules_tokens($type, $tokens, array $data = array(), array $options = array()) {
+  $replacements = array();
+  if ($type == 'inventory_rules') {
+    foreach ($tokens as $name => $original) {
+      // Simple key values in variables.
+      if ($name == 'category_name') {
+        // Replace token with summary of skus with remaining stock.
+        $replacements[$original] = findit_get_term_name_from_tid($data['inventory-cat-id']);
+      }
+      if ($name == 'products_summary_soft_limit') {
+        // Get categories summary associated with this email group.
+        $products_summary = findit_products_summary_inventory($data['inventory-cat-id'], $data['inventory-soft-limit']);
+
+        // Replace token with summary of skus with remaining stock.
+        $replacements[$original] = $products_summary;
+      }
+      elseif ($name == 'products_summary_hard_limit') {
+        // Get categories summary associated with this email group.
+        $products_summary = findit_products_summary_inventory($data['inventory-cat-id'], $data['inventory-hard-limit']);
+
+        // Replace token with summary of skus with remaining stock.
+        $replacements[$original] = $products_summary;
+      }
+      elseif ($name == 'category_names_soft_limit') {
+        $replacements[$original] = $data['inventory-soft-limit'];
+      }
+      elseif ($name == 'category_names_hard_limit') {
+        $replacements[$original] = $data['inventory-hard-limit'];
+      }
+    }
+  }
+  return $replacements;
+}
+
+/**
+ * Function for getting summary of products inventory in a category.
+ */
+function findit_products_inventory_count($cat_id, $limit = NULL) {
+  // Query for getting summary of products inventory for a category.
+  $query = db_select('eck_association', 'ea');
+  $query->leftJoin('findit_products_inventory_rule', 'pir', 'pir.sku=ea.sku');
+  $query->leftJoin('commerce_product', 'cp', 'cp.product_id=ea.product');
+  $query->addField('ea', 'sku', 'sku');
+  $query->addField('pir', 'sku', 'pir_sku');
+  $query->addField('ea', 'unique_store_id', 'unique_store_id');
+  $query->addField('cp', 'title', 'product_title');
+  $query->condition('ea.tid', $cat_id);
+  $query->condition('ea.status', 1);
+  // Get skus for which explicit inventory rule is not set.
+  $query->isNull('pir.sku');
+  $query->addExpression('SUM(stock)', 'stock');
+  $query->groupBy('sku');
+  if ($limit != NULL) {
+    $query->havingCondition('stock', $limit, '<=');
+  }
+  $result = $query->execute()->fetchAll();
+  return $result;
+}
+
+/**
+ * Function for getting summary of inventory going below soft limit.
+ */
+function findit_products_summary_inventory($cat_id, $limit) {
+  global $base_url;
+  $inventory_data = findit_products_inventory_count($cat_id, $limit);
+  if (!empty($inventory_data)) {
+    $header = array(t('Title'), t("SKU"), t("Stock"));
+    $rows = array();
+    foreach ($inventory_data as $data) {
+      // Fill the table rows.
+      $rows[] = array(
+        $data->product_title,
+        l($data->sku, $base_url . '/seller/' . $data->unique_store_id . '/profile'),
+        $data->stock,
+      );
+    }
+    return theme('table', array(
+      'header' => $header,
+      'rows' => $rows,
+    ));
+  }
+  return '';
+}
+
+/**
+ * Function for returning email id groups.
+ */
+function findit_inventory_mail_groups() {
+  $groups = array(
+    'group_1' => 'group_1',
+    'group_2' => 'group_2',
+    'group_3' => 'group_3',
+    'group_4' => 'group_4',
+    'group_5' => 'group_5',
+  );
+  return $groups;
+}
+
+/**
+ * Function for retrieving email ids of each group.
+ */
+function findit_inventory_get_email_ids_of_group($group_name) {
+  // Query for getting list of email ids associated with the group.
+  // ToDo later.
+  $email_ids = array(
+    'group_1' => array(
+      'mostlybest@gmail.com',
+      'neelam@srijan.in',
+      'biswajeet.mondal@srijan.in',
+    ),
+    'group_2' => array('toysrtoys9@gmail.com', 'neel.amy10@gmail.com'),
+    'group_4' => array('neelam100@yopmail.com', 'neel.amy10@gmail.com'),
+    'group_5' => array('neelam1000@yopmail.com', 'neel.amy10@gmail.com'),
+  );
+  return $email_ids[$group_name];
+}
+
+/**
+ * Implements hook_theme().
+ */
+function findit_inventory_rules_theme() {
+  $items['findit_inventory_rules_interface'] = array(
+    'variables' => array('data' => NULL),
+    'path' => drupal_get_path('module', 'findit_inventory_rules') . '/templates',
+    'template' => 'inventory_rules',
+  );
+  return $items;
+}
+
+/**
+ * Function for getting email group of the category.
+ */
+function findit_get_inventory_rules_category($cat) {
+  $query = db_select('findit_inventory_rules');
+  $query->condition('tid', $cat);
+  $query->condition('status', 1);
+  $query->fields('findit_inventory_rules', array(
+    'email_group',
+    'inventory_rule_soft_limit',
+    'inventory_rule_hard_limit',
+  ));
+  $result = $query->execute()->fetchAssoc();
+  return $result;
+}
+
+/**
+ * Function for getting term name from tid.
+ */
+function findit_get_term_name_from_tid($tid) {
+  $query = db_select('taxonomy_term_data');
+  $query->condition('tid', $tid);
+  $query->fields('taxonomy_term_data', array('name'));
+  $result = $query->execute()->fetchAssoc();
+  return $result['name'];
+}

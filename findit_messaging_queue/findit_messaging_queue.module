@@ -1,0 +1,28 @@
+<?php
+
+module_load_include('inc', 'findit_messaging_queue', 'findit_messaging_queue');
+
+/**
+ * Implements hook_menu()
+ */
+function findit_messaging_queue_menu() {
+  $items['message/receiver1'] = array(
+    'page callback' => 'messagequeue_receiver',
+    'access callback' => TRUE,
+    'title' => t('Message Queue Producer'),
+  );
+  $items['admin/commerce/config/rabit-mq-config'] = array(
+    'title' => 'Rabit MQ Configuration',
+    'description' => 'Rabit MQ Configuration',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('findit_rabit_mq_conf_admin_setting_form'),
+    'access arguments' => array('administer site configuration'),
+    'file' => 'findit_messaging_queue.admin.inc',
+  );
+  return $items;
+}
+
+function messagequeue_receiver() {
+  $worker = new MessageReceiver();
+  $worker->receiver('findit_market_place_to_marchant');
+}

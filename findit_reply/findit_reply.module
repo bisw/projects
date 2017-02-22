@@ -1,0 +1,790 @@
+<?php
+
+/**
+ * @file
+ * Module file for findit order return module.
+ */
+module_load_include('inc', 'findit_reply', 'classes/finditreply.classes');
+
+/**
+ * Implements hook_menu().
+ */
+function findit_reply_menu() {
+  $items = array();
+
+  $items['user/%user/review'] = array(
+    'title' => 'Reviews',
+    'page callback' => 'findit_reply_view',
+    'page arguments' => array(1),
+    'file' => 'findit_reply.page.inc',
+    'access arguments' => array('review findit access'),
+    'type' => MENU_LOCAL_TASK,
+  );
+  $items['user/%user/review/default-reviews'] = array(
+    'title' => 'Reviews',
+    'page callback' => 'findit_reply_view',
+    'page arguments' => array(1),
+    'file' => 'findit_reply.page.inc',
+    'access arguments' => array('review findit access'),
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'weight' => -10,
+  );
+  $items['user/%user/review/disable-product-reviews'] = array(
+    'title' => 'Rejected Product Reviews',
+    'page callback' => 'findit_reply_view_disable_product_reviews',
+    'page arguments' => array(1, 'product'),
+    'file' => 'findit_reply.page.inc',
+    'access arguments' => array('review findit access'),
+    'type' => MENU_LOCAL_TASK,
+  );
+  $items['user/%user/review/disable-seller-reviews'] = array(
+    'title' => 'Rejected Seller Reviews',
+    'page callback' => 'findit_reply_view_disable_product_reviews',
+    'page arguments' => array(1, 'store'),
+    'file' => 'findit_reply.page.inc',
+    'access arguments' => array('review findit access'),
+    'type' => MENU_LOCAL_TASK,
+  );
+  $items['user/%user/review/bulk-reviews'] = array(
+    'title' => 'Bulk Reviews',
+    'page callback' => 'findit_reply_view',
+    'page arguments' => array(3),
+    'file' => 'findit_reply.page.inc',
+    'access arguments' => array('review findit access'),
+    'type' => MENU_LOCAL_TASK,
+  );
+  $items['review/%/view'] = array(
+    'title' => 'Review view page',
+    'page callback' => 'findit_reply_view_reviews',
+    'page arguments' => array(1),
+    'file' => 'findit_reply.page.inc',
+    'access arguments' => array('review findit access'),
+    'type' => MENU_LOCAL_TASK,
+  );
+
+  $items['user/%user/reported_review'] = array(
+    'title' => 'Reported Reviews',
+    'page callback' => 'findit_reported_reply_view',
+    'page arguments' => array(1),
+    'file' => 'findit_reply.page.inc',
+    'access arguments' => array('review findit access'),
+    'type' => MENU_LOCAL_TASK,
+  );
+  $items['store/%commerce_store/review'] = array(
+    'title' => 'My Reviews',
+    'page callback' => 'findit_reply_store_view',
+    'page arguments' => array(1),
+    'file' => 'findit_reply.page.inc',
+    'access callback' => 'store_review_access_for_merchant',
+    'access arguments' => array(1),
+    'type' => MENU_LOCAL_TASK,
+  );
+  $items['store/%commerce_store/review/store'] = array(
+    'title' => 'Seller Reviews',
+    'page callback' => 'findit_reply_store_view',
+    'page arguments' => array(1),
+    'file' => 'findit_reply.page.inc',
+    'access callback' => 'store_review_access_for_merchant',
+    'access arguments' => array(1),
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'weight' => -100,
+  );
+  $items['store/%commerce_store/review/product'] = array(
+    'title' => 'Product Reviews',
+    'page callback' => 'findit_reply_product_view',
+    'page arguments' => array(1),
+    'file' => 'findit_reply.page.inc',
+    'access callback' => 'store_review_access_for_merchant',
+    'access arguments' => array(1),
+    'type' => MENU_LOCAL_TASK,
+  );
+  $items['admin/config/marketplace-reply'] = array(
+    'title' => 'Review & rating Settings',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('findit_reply_settings'),
+    'access arguments' => array('access administration pages'),
+    'type' => MENU_NORMAL_ITEM,
+    'file' => 'findit_reply.page.inc',
+    'description' => 'Marketplace reply settings',
+  );
+  $items['review/%ctools_js/%'] = array(
+    'title' => 'Reviews',
+    'page callback' => 'review_page_callback',
+    'access callback' => TRUE,
+    'page arguments' => array(1, 2),
+    'type' => MENU_NORMAL_ITEM,
+    'file' => 'findit_reply.page.inc',
+    'description' => 'Marketplace reply settings',
+  );
+  // Temporary menu will be removed later when dummy user is added.
+  $items['admin/commerce/admin_id_config'] = array(
+    'title' => "Admin ID(Dummy User)",
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('findit_admin_id_config_settings'),
+    'access arguments' => array('access administration pages'),
+    'type' => MENU_NORMAL_ITEM,
+    'description' => 'Admin Id Settings',
+    'file' => 'findit_reply.admin.inc',
+  );
+  $items['report-to-findit/%ctools_js/%/%'] = array(
+    'title' => "Report to findit",
+    'page callback' => 'report_to_findit_callback',
+    'page arguments' => array(1, 2),
+    'access callback' => 'review_merchent_operation',
+    'access arguments' => array(3),
+    'type' => MENU_NORMAL_ITEM,
+    'description' => 'Report to findit callback',
+    'file' => 'findit_reply.page.inc',
+  );
+  $items['report-to-findit-reasons'] = array(
+    'title' => 'Report to findit Reasons',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('report_to_findit_reasons'),
+    'access arguments' => array('send bulk message'),
+    'file' => 'findit_reply.admin.inc',
+    'type' => MENU_LOCAL_TASK,
+  );
+  $items['user/%user/reported_to_findit_reviews'] = array(
+    'title' => 'Reported to Findit Reviews',
+    'page callback' => 'findit_reported_to_findit_view',
+    'page arguments' => array(1),
+    'file' => 'findit_reply.page.inc',
+    'access arguments' => array('review findit access'),
+    'type' => MENU_LOCAL_TASK,
+  );
+  $items['ignore-raise-to-findit/%'] = array(
+    'page callback' => 'findit_raise_to_findit_ignore',
+    'page arguments' => array(1),
+    'file' => 'findit_reply.page.inc',
+    'access arguments' => array('review findit access'),
+    'type' => MENU_LOCAL_TASK,
+  );
+  return $items;
+}
+
+/**
+ * Access callback function for store reviews access.
+ */
+function store_review_access_for_merchant($store) {
+  global $user;
+  $unique_store_id = _get_store_unique_id($user->uid);
+  return $store->unique_store_id == $unique_store_id ? TRUE : FALSE;
+}
+
+/**
+ * Implements hook_theme().
+ */
+function findit_reply_theme() {
+  $items['findit_reply_view'] = array(
+    'variables' => array(),
+    'path' => drupal_get_path('module', 'findit_reply') . '/templates',
+    'template' => 'replyview',
+  );
+  $items['findit_reply_rating_bars'] = array(
+    'variables' => array('rating' => NULL, 'extra_data' => NULL),
+    'path' => drupal_get_path('module', 'findit_reply') . '/templates',
+    'template' => 'findit-reply-rating-bars',
+  );
+  $items['seller_product_review'] = array(
+    'variables' => array('data' => NULL),
+    'path' => drupal_get_path('module', 'findit_reply') . '/templates',
+    'template' => 'seller-product-review',
+  );
+   $items['seller_store_review'] = array(
+    'variables' => array('data' => NULL),
+    'path' => drupal_get_path('module', 'findit_reply') . '/templates',
+    'template' => 'seller-store-review',
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_permission().
+ */
+function findit_reply_permission() {
+  return array(
+    'view review at merchant site' => array(
+      'title' => t('view review at merchant site'),
+      'description' => t('view review at merchant site.'),
+    ),
+    'reply on review at merchant site' => array(
+      'title' => t('reply on review at merchant site'),
+      'description' => t('reply on review at merchant site.'),
+    ),
+    'admin review at merchant site' => array(
+      'title' => t('admin review at merchant site'),
+      'description' => t('admin review at merchant site.'),
+    ),
+    'review merchent access' => array(
+      'title' => t('review merchent access'),
+      'description' => t('Perform review merchent actions.'),
+    ),
+    'review findit access' => array(
+      'title' => t('review findit access'),
+      'description' => t('Perform review findit actions.'),
+    ),
+  );
+}
+
+/**
+ * Access Callback for operations on reviews.
+ */
+function review_merchent_operation($store_id) {
+  $unique_store_id = merchant_unique_store_id();
+  return $unique_store_id == $store_id ? TRUE : FALSE;
+}
+
+/**
+ * Implements hook_services_resources().
+ */
+function findit_reply_services_resources() {
+
+  $resource = array(
+    'reply' => array(
+      'operations' => array(
+        'retrieve' => array(
+          'help' => 'Retrieve a reply',
+          'file' => array(
+            'type' => 'inc',
+            'module' => 'findit_reply_services',
+            'name' => 'classes/finditreply.classes',
+          ),
+          'callback' => 'finditreply::retrieve',
+          'access callback file' => array(
+            'type' => 'inc',
+            'module' => 'findit_reply_services',
+            'name' => 'classes/finditreply.classes',
+          ),
+          'args' => array(
+            array(
+              'name' => 'entity_id',
+              'optional' => FALSE,
+              'source' => array('path' => 0),
+              'type' => 'int',
+              'description' => 'The entity_id to retrieve',
+            ),
+          ),
+          'access callback' => 'finditreply::access',
+          'access arguments' => array('view'),
+          'access arguments append' => TRUE,
+        ),
+        'create' => array(
+          'help' => 'Create a reply',
+          'file' => array(
+            'type' => 'inc',
+            'module' => 'findit_reply_services',
+            'name' => 'classes/finditreply.classes',
+          ),
+          'callback' => 'finditreply::create',
+          'args' => array(
+            array(
+              'name' => 'reply',
+              'optional' => FALSE,
+              'source' => 'data',
+              'description' => 'The reply data to create',
+              'type' => 'array',
+            ),
+          ),
+          'access callback' => 'finditreply::access',
+          'access arguments' => array('create'),
+          'access callback file' => array(
+            'type' => 'inc',
+            'module' => 'findit_reply_services',
+            'name' => 'classes/finditreply.classes',
+          ),
+          'access arguments append' => TRUE,
+        ),
+        'update' => array(
+          'help' => 'Update a node',
+          'file' => array(
+            'type' => 'inc',
+            'module' => 'findit_reply_services',
+            'name' => 'classes/finditreply.classes',
+          ),
+          'callback' => 'finditreply::update',
+          'args' => array(
+            array(
+              'name' => 'entity_id',
+              'optional' => FALSE,
+              'source' => array('path' => 0),
+              'type' => 'int',
+              'description' => 'The entity_id to update',
+            ),
+            array(
+              'name' => 'entity',
+              'optional' => FALSE,
+              'source' => 'data',
+              'description' => 'The entity data to update',
+              'type' => 'array',
+            ),
+          ),
+          'access callback' => 'finditreply::access',
+          'access arguments' => array('update'),
+          'access callback file' => array(
+            'type' => 'inc',
+            'module' => 'findit_reply_services',
+            'name' => 'classes/finditreply.classes',
+          ),
+          'access arguments append' => TRUE,
+        ),
+        'delete' => array(
+          'help' => t('Delete a node'),
+          'file' => array(
+            'type' => 'inc',
+            'module' => 'findit_reply_services',
+            'name' => 'classes/finditreply.classes',
+          ),
+          'callback' => 'finditreply::delete',
+          'args' => array(
+            array(
+              'name' => 'entity_id',
+              'optional' => FALSE,
+              'source' => array('path' => 0),
+              'type' => 'int',
+              'description' => 'The entity_id to delete',
+            ),
+          ),
+          'access callback file' => array(
+            'type' => 'inc',
+            'module' => 'findit_reply_services',
+            'name' => 'classes/finditreply.classes',
+          ),
+          'access callback' => 'finditreply::access',
+          'access arguments' => array('delete'),
+          'access arguments append' => TRUE,
+        ),
+        'index' => array(
+          'help' => 'List all nodes',
+          'file' => array(
+            'type' => 'inc',
+            'module' => 'findit_reply_services',
+            'name' => 'classes/finditreply.classes',
+          ),
+          'callback' => 'finditreply::index',
+          'args' => array(
+            array(
+              'name' => 'fields',
+              'optional' => TRUE,
+              'type' => 'string',
+              'description' => 'The fields to get.',
+              'default value' => '*',
+              'source' => array('param' => 'fields'),
+            ),
+            array(
+              'name' => 'parameters',
+              'optional' => TRUE,
+              'type' => 'array',
+              'description' => 'Parameters array',
+              'default value' => array(),
+              'source' => array('param' => 'parameters'),
+            ),
+            array(
+              'name' => 'page',
+              'optional' => TRUE,
+              'type' => 'int',
+              'description' => 'The zero-based index of the page to get, defaults to 0.',
+              'default value' => 0,
+              'source' => array('param' => 'page'),
+            ),
+            array(
+              'name' => 'pagesize',
+              'optional' => TRUE,
+              'type' => 'int',
+              'description' => 'Number of records to get per page.',
+              'default value' => 20,
+              'source' => array('param' => 'pagesize'),
+            ),
+            array(
+              'name' => 'sort',
+              'optional' => TRUE,
+              'type' => 'string',
+              'description' => 'Field to sort by.',
+              'default value' => '',
+              'source' => array('param' => 'sort'),
+            ),
+            array(
+              'name' => 'direction',
+              'optional' => TRUE,
+              'type' => 'string',
+              'description' => 'Direction of the sort. ASC or DESC.',
+              'default value' => 'ASC',
+              'source' => array('param' => 'direction'),
+            ),
+          ),
+          'access callback file' => array(
+            'type' => 'inc',
+            'module' => 'findit_reply_services',
+            'name' => 'classes/finditreply.classes',
+          ),
+          'access arguments' => array('index'),
+          'access callback' => 'finditreply::access',
+        ),
+      ),
+    ),
+    'reply_mail' => array(
+      'operations' => array(
+        'create' => array(
+          'help' => 'Send a mail for review and rating',
+          'file' => array(
+            'type' => 'inc',
+            'module' => 'findit_reply_services',
+            'name' => 'classes/finditreply.classes',
+          ),
+          'callback' => 'finditreply::mail',
+          'args' => array(
+            array(
+              'name' => 'reply',
+              'optional' => FALSE,
+              'source' => 'data',
+              'description' => 'Send a mail for review and rating',
+              'type' => 'array',
+            ),
+          ),
+          'access callback' => 'finditreply::access',
+          'access arguments' => array('view'),
+          'access callback file' => array(
+            'type' => 'inc',
+            'module' => 'findit_reply_services',
+            'name' => 'classes/finditreply.classes',
+          ),
+          'access arguments append' => TRUE,
+        ),
+      ),
+    ),
+  );
+
+  return $resource;
+}
+
+/**
+ * Function for getting logged in user's role.
+ */
+function findit_reply_user_get_role() {
+  global $user;
+  $roles_array = variable_get('audit_log_role', array());
+  foreach ($user->roles as $key => $value) {
+    if (in_array($key, $roles_array)) {
+      $role = user_role_load($key);
+      return $role->name;
+    }
+  }
+}
+
+/**
+ * Implements hook_pet_substitutions_alter().
+ */
+function findit_reply_pet_substitutions_alter(&$substitutions, $params) {
+  $review = pet_isset_or($params['review']);
+  if (!empty($review)) {
+    $substitutions['review'] = $review;
+  }
+  $account = pet_isset_or($params['pet_account']);
+  if (!empty($account)) {
+    $substitutions['user'] = $account;
+  }
+  $substitutions['review-extra'] = (object) $params['review-extra'];
+  $substitutions['review-extra-on-seller'] = (object) $params['review-extra-on-seller'];
+  $substitutions['miscellaneous-mail'] = (object) $params['miscellaneous-mail'];
+}
+
+/**
+ * Implements hook_form_BASE_FORM_ID_alter().
+ */
+function findit_reply_form_pet_form_alter(&$form, &$form_state, $form_id) {
+  findit_reply_add_tokens($form);
+}
+
+/**
+ * Implements hook_form_BASE_FORM_ID_alter().
+ */
+function findit_reply_form_pet_user_form_alter(&$form, &$form_state, $form_id) {
+  findit_reply_add_tokens($form, $form_state);
+  if (isset($form_state['storage'])) {
+    $form_state['storage']['review'] = pet_is_natural(pet_isset_or($_REQUEST['review'])) ? $_REQUEST['review'] : NULL;
+  }
+}
+
+/**
+ * List commerce order and return tokens at pet form.
+ *
+ * @TODO add commerce discount and other types tokens
+ */
+function findit_reply_add_tokens(&$form) {
+  if (isset($form['tokens']['token_tree'])) {
+    $form['tokens']['token_tree']['#token_types'][] = 'review';
+  }
+}
+
+/**
+ * Function for sending mail on publish/unpublish of seller review.
+ */
+function findit_reply_send_mail_merchant_comment_status($review) {
+  if ($review['type'] == 'store') {
+    $vars = array();
+    $store = findit_reply_order_get_store_unique_id($review['store_id']);
+    $vars['account'] = user_load($store->uid);
+    $vars['pet_name'] = variable_get('review_mail_for_merchant_on_publish_unpublish', 'review_mail_for_merchant_on_publish_unpublish');
+    $vars['review'] = $review;
+    $vars['review']['review_page_url'] = url('/store/' . $store->store_id . '/review/product', array('absolute' => TRUE));
+    $vars['review']['review_url'] = url('/store/' . $store->store_id . '/review/product', array('absolute' => TRUE, 'query' => array('id' => $review['id'])));
+    findit_reply_send_pet($vars);
+  }
+}
+
+/**
+ * Function for getting unique store id from store id.
+ */
+function findit_reply_order_get_store_unique_id($store_id) {
+  $result = db_select('commerce_store', 'cs')
+      ->fields('cs', array())
+      ->condition('cs.unique_store_id', $store_id)
+      ->execute();
+
+  foreach ($result as $store) {
+    return $store;
+  }
+}
+
+/**
+ * Function for sending mail on publish/unpublish of product review.
+ */
+function findit_reply_send_mail_merchant_product_review($review) {
+  $result = db_select('eck_association', 'cs')
+      ->fields('cs', array())
+      ->condition('cs.status', 1)
+      ->condition('cs.statusbyadmin', 1)
+      ->condition('cs.sku', $review['sku'])
+      ->execute();
+  $vars = array();
+  $vars['pet_name'] = variable_get('review_mail_for_merchant_on_product_review', 'review_mail_for_merchant_on_product_review');
+  $vars['review'] = $review;
+  foreach ($result as $data) {
+    $store = findit_reply_order_get_store_unique_id($data->unique_store_id);
+    $vars['account'] = user_load($store->uid);
+    $vars['review']['review_page_url'] = url('store/' . $store->store_id . '/review/' . $review['type'], array('absolute' => TRUE));
+    $vars['review']['review_url'] = url('store/' . $store->store_id . '/review/' . $review['type'], array('absolute' => TRUE, 'query' => array('id' => $review['id'])));
+    $vars['review']['seller_name'] = $store->title;
+    findit_reply_send_pet($vars);
+  }
+}
+
+/**
+ * Function for sending mail for review operations.
+ */
+function findit_reply_send_mail_customer_review($review, $type = 'status', $account) {
+  switch ($type) {
+    case 'publish':
+      $pet_name = 'review_mail_for_customer_on_publish';
+      break;
+
+    case 'unpublish':
+    case 'status':
+      $pet_name = 'review_mail_for_customer_review_status';
+      break;
+
+    case 'deleted':
+      $pet_name = 'review_mail_for_customer_review_deleted';
+      break;
+
+    case 'report':
+      $pet_name = 'review_mail_for_customer_review_report';
+      break;
+
+    default:
+      $pet_name = '';
+      break;
+  }
+  $vars['account'] = $account;
+  $vars['pet_name'] = $pet_name;
+  $vars['review'] = $review;
+  findit_reply_send_pet($vars);
+}
+
+/**
+ * Function for sending mail for reviews.
+ */
+function findit_reply_send_pet($vars = array()) {
+  $pet = pet_load($vars['pet_name']);
+  if (!$pet) {
+    watchdog('pet', 'PET [%name] not found.', array('%name' => $vars['pet_name']), WATCHDOG_ERROR);
+    return;
+  }
+  // Resolve the recipient.
+  if (isset($vars['account'])) {
+    $pet_to = $vars['account']->mail;
+  }
+  elseif (isset($vars['to'])) {
+    $pet_to = $vars['to'];
+  }
+  else {
+    watchdog('pet', 'Mail send using %name PET failed. No recipient provided.', array('%name' => $vars['pet_name']), WATCHDOG_ERROR);
+    return;
+  }
+  $params = array(
+    'pet_from' => variable_get('site_mail', ini_get('sendmail_from')),
+    'pet_to' => $pet_to,
+    'pet_account' => isset($vars['account']) ? $vars['account'] : NULL,
+    'pet_cc' => pet_parse_mails(pet_isset_or($pet->cc_default)),
+    'pet_bcc' => pet_parse_mails(pet_isset_or($pet->bcc_default)),
+    'review' => $vars['review'],
+  );
+  pet_send_one_mail($pet, $params);
+}
+
+/**
+ * Function to detect if it is comment or a review.
+ */
+function findit_get_msg_type($parent) {
+  if ($parent) {
+    return "Comment";
+  }
+  else {
+    return "Review";
+  }
+}
+
+/**
+ * Function to detect normal user and seller.
+ */
+function findit_get_usertype($uid) {
+  if ($uid == variable_get('admin_dummy_id')) {
+    return "Seller";
+  }
+  else {
+    return "Customer";
+  }
+}
+
+/**
+ * Send mail to thread author.
+ */
+function findit_reply_send_mail_review_author($review, $type = 'status', $account) {
+  if (isset($review['review_by']) && $review['review_by'] != 'customer') {
+    return;
+  }
+  switch ($type) {
+    case 'status':
+      $pet_name = variable_get('findit_reply_send_mail_review_author_status', 'review_mail_for_author_on_publish_unpublish');
+      break;
+
+    default:
+      $pet_name = '';
+      break;
+  }
+  $vars['account'] = $account;
+  $vars['pet_name'] = $pet_name;
+  $vars['review'] = $review;
+  findit_reply_send_pet($vars);
+}
+
+/**
+ * Implements hook_block_info().
+ */
+function findit_reply_block_info() {
+  $blocks = array();
+  $blocks['seller_all_rating'] = array(
+    'info' => t('Seller Profile Rating Block'),
+  );
+  return $blocks;
+}
+
+/**
+ * Function for getting store name from unique store id.
+ */
+function _get_seller_name_from_store_id($unique_store_id) {
+  $query = db_select('commerce_store', 'cs');
+  $query->fields('cs', array('unique_store_id'));
+  $query->condition('cs.store_id', $unique_store_id);
+  $result = $query->execute()->fetchAssoc();
+  return $result['unique_store_id'];
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function findit_reply_block_view($delta = '') {
+  $block = array();
+  switch ($delta) {
+    case 'seller_all_rating':
+      if (arg(1) && is_numeric(arg(1))) {
+        $store_id = arg(1);
+        $store_unique_id = _get_seller_name_from_store_id($store_id);
+        $block['subject'] = t('Seller Profile Rating Block');
+        $block['content'] = findit_merchant_get_sellers_all_rating($store_unique_id, $store_id);
+      }
+      break;
+  }
+  return $block;
+}
+
+/**
+ * Function for showing merchant rating.
+ */
+function findit_merchant_get_sellers_all_rating($unique_store_id, $store_id) {
+  $url = variable_get('marketplace_url') . '/api_market/merchant-seller-rating-service/merchant/' . $unique_store_id;
+  // Parameters to pass to URL.
+  $data = 'type&value=' . $unique_store_id;
+  $options = array(
+    'method' => 'GET',
+    'data' => $data,
+    'headers' => array('Content-Type' => 'application/x-www-form-urlencoded'),
+  );
+  $result = drupal_http_request($url, $options);
+  $rating = drupal_json_decode($result->data);
+  $entity_val = entity_load_single('commerce_store', $store_id);
+  $freeReturn = $entity_val->field_free_return[LANGUAGE_NONE][0]['value'] > 0 ? 'show' : 'hide';
+  $replacementGuarantee = $entity_val->field_replacement_guarantee[LANGUAGE_NONE][0]['value'] > 0 ? 'show' : 'hide';
+  $giftWrap = $entity_val->field_gift_wrap[LANGUAGE_NONE][0]['value'] > 0 ? 'show' : 'hide';
+  return theme('findit_reply_rating_bars', array('rating' => $rating, 'extra_data' => array($freeReturn, $replacementGuarantee, $giftWrap)));
+}
+
+/**
+ * Implements hook__menu_local_tasks_alter().
+ */
+function findit_reply_menu_local_tasks_alter(&$data, $router_item, $root_path) {
+  if ($root_path == 'store/%/review/product' || $root_path == 'store/%/review') {
+    unset($data['tabs'][0]);
+  }
+}
+
+/**
+ * Function to get store_unique_id from user id.
+ */
+function _get_store_unique_id($uid) {
+  $query = db_select('commerce_store', 'cs')
+      ->fields('cs', array('unique_store_id'))
+      ->condition('uid', $uid, '=')
+      ->execute();
+  $store_unique_id = $query->fetchField();
+  return $store_unique_id;
+}
+
+/**
+ * Function for getting order id on merchant from order id on marketplace.
+ *
+ * @param int $ref_order_id
+ *   Order id on merketplace.
+ *
+ * @return int
+ *   Order id on merchant app.
+ */
+function commerce_order_get_ref_order_id($ref_order_id) {
+  $result = db_select('field_data_field_order_refrence', 'cs')
+      ->fields('cs', array('entity_id'))
+      ->condition('cs.field_order_refrence_value', $ref_order_id)
+      ->execute()
+      ->fetchField();
+  return $result;
+}
+
+/**
+ * Function to get product title by product id.
+ */
+function findit_get_product_title($sku) {
+  $query = db_select('commerce_product', 'cp')
+      ->fields('cp', array('title'))
+      ->condition('sku', $sku, '=')
+      ->execute();
+  $result = $query->fetchField();
+  return $result;
+}

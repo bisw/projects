@@ -1,0 +1,60 @@
+<?php
+
+/**
+ * Function to update stock
+ * @param type $quantity
+ * @param type $product_sku
+ * @param type $store_unique_id
+ */
+function findit_inventory_control_update_stock($quantity, $product_sku, $store_unique_id) {
+
+  $query = db_select('eck_association', 'ea');
+  $query->fields('ea');
+  $query->fields('u', array('name', 'mail'));
+  $query->fields('cp', array('title'));
+  //$query->fields('fdad',array('akeneo_description_value'));
+  $query->leftjoin('users', 'u', 'u.uid = ea.uid');
+  $query->leftjoin('commerce_product', 'cp', 'cp.sku = ea.sku');
+  //$query->leftjoin('field_data_akeneo_description','fdad','fdad.entity_id = cp.product_id');
+  $query->condition('ea.sku', $product_sku);
+  $query->condition('ea.unique_store_id', $store_unique_id);
+  $data = $query->execute()->fetchAssoc();
+
+  if ($data) {
+    $stock = $data['stock'] - $quantity;
+    // cache_clear_all($data['id'], 'cache_entity_association');
+    //Update stock
+    $query = db_update('eck_association')
+        ->fields(array('stock' => $stock, 'sync_stage' => 1, 'changed' => time()))
+        ->condition('sku', $product_sku)
+        ->condition('unique_store_id', $store_unique_id);
+    $rows = $query->execute();
+    cache_clear_all($data['id'], 'cache_entity_association');
+
+    //send stock low limit notification to merchant
+    if ($stock <= $data['stock_low_limit_notification']) {
+
+      $params = array();
+      $from = variable_get('site_mail', ini_get('sendmail_from'));
+      $params['pet_from'] = $from;
+      $params['pet_bcc'] = 'anand.vyas@srijan.in';
+
+      $pet = pet_load('stock_low_limit_notification');
+      if (isset($pet->pid)) {
+
+        $tmp_data = array();
+        $tmp_data['sku_list'] = skuDetailForMail($data['sku']);
+        $tmp_data['sku'] = $data['title'];
+        $tmp_data['stock'] = $stock;
+        $tmp_data['merchant_name'] = $data['name'];
+
+        $params['pet_to'] = $data['mail'];
+        $params['pet_data'] = $tmp_data;
+
+        pet_send_one_mail($pet, $params);
+      } else {
+        drupal_set_message('stock_low_limit_notification mail template not set', 'error');
+      }
+    }
+  }
+}

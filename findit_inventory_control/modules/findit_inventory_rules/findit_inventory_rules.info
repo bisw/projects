@@ -1,0 +1,4 @@
+name = Findit Inventory Rules
+description = This module defines inventory rules for categories
+core = 7.x
+package = Findit

@@ -1,0 +1,711 @@
+<?php
+
+/*
+ * @file - Module file for findit order return module.
+ *
+ */
+module_load_include('inc', 'findit_order_return', 'classes/finditreturn.classes');
+
+/**
+ * Implements hook_commerce_return_state_info().
+ */
+function findit_order_return_menu() {
+  $items = array();
+
+  $items['returns/%commerce_return'] = array(
+    //'title callback' => 'entity_label',
+    'title' => '',
+    'title arguments' => array('commerce_return', 1),
+    'page callback' => 'findit_order_return_view',
+    'page arguments' => array(1),
+    'access callback' => 'commerce_rma_access',
+    'file' => 'findit_order_return.page.inc',
+    'access arguments' => array('update', 1),
+  );
+  $items['returns/%commerce_return/reject'] = array(
+    'title callback' => 'entity_label',
+    'title arguments' => array('commerce_return', 1),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('findit_order_return_reject_form', 1),
+    'access callback' => 'commerce_rma_access',
+    'file' => 'findit_order_return.page.inc',
+    'access arguments' => array('update', 1),
+  );
+  return $items;
+}
+
+function findit_order_return_permission() {
+  return array(
+    'return merchent access' => array(
+      'title' => t('Return merchent access'),
+      'description' => t('Perform return merchent actions.'),
+    ),
+    'return findit access' => array(
+      'title' => t('Return findit access'),
+      'description' => t('Perform return findit actions.'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_commerce_return_state_info().
+ */
+function findit_order_return_commerce_return_state_info() {
+  $return_states = array();
+  $return_states['rejected'] = array(
+    'name' => 'rejected',
+    'title' => t('Rejected'),
+    'description' => t('returns in this state have been Rejected through some user action.'),
+    'weight' => 5,
+    'default_status' => 'rejected',
+  );
+  return $return_states;
+}
+
+/**
+ * Implements hook_commerce_return_status_info().
+ */
+function findit_order_return_commerce_return_status_info() {
+  $return_states['rejected'] = array(
+    'name' => 'rejected',
+    'title' => t('Return item rejected'),
+    'description' => t('returns in this state have been rejected (disputed order) through some user action.'),
+    'weight' => -11,
+    'state' => 'rejected',
+  );
+  $return_states['processed'] = array(
+    'name' => 'processed',
+    'title' => t('Ready for reverse pick-up'),
+    'description' => t('returns in this state have been processed(Ready for pick-up) and are awaiting further action.'),
+    'weight' => 2,
+    'state' => 'pending',
+  );
+  $return_states['picked'] = array(
+    'name' => 'picked',
+    'title' => t('Item returned by user'),
+    'description' => t('returns in this state have been processed(Item returned by user) and are awaiting further action.'),
+    'weight' => 3,
+    'state' => 'pending',
+  );
+
+  $return_states['received'] = array(
+    'name' => 'received',
+    'title' => t('Item received'),
+    'description' => t('returns in this state have been processed(Order received - return in progress) by Merchant and are awaiting further action.'),
+    'weight' => 4,
+    'state' => 'pending',
+  );
+
+  $return_states['approved'] = array(
+    'name' => 'approved',
+    'title' => t('Return item accepted'),
+    'description' => t('returns in this state have been approved for refund by Merchant through some user action.'),
+    'weight' => 5,
+    'state' => 'pending',
+  );
+
+  $return_states['offline_settlement'] = array(
+    'name' => 'offline_settlement',
+    'title' => t('Return Completed'),
+    'description' => t('returns in this state have been Offline settlement through some user action.'),
+    'weight' => 1,
+    'state' => 'completed',
+  );
+  $return_states['credit_progress'] = array(
+    'name' => 'credit_progress',
+    'title' => t('Initiate store credits transfer'),
+    'description' => t('returns in this state have been resolved and are awaiting further action.'),
+    'weight' => -5,
+    'state' => 'completed',
+  );
+  $return_states['credit_refunded'] = array(
+    'name' => 'credit_refunded',
+    'title' => t('Store credits transferred successfully'),
+    'description' => t('returns in this state have been Refund credits through some user action.'),
+    'weight' => -4,
+    'state' => 'completed',
+  );
+
+  $return_states['bank_progress'] = array(
+    'name' => 'bank_progress',
+    'title' => t('Initiate bank transfer'),
+    //'description' => t('returns in this state have been Refund credits through some user action.'),
+    'weight' => -3,
+    'state' => 'completed',
+  );
+  $return_states['bank_refunded'] = array(
+    'name' => 'bank_refunded',
+    'title' => t('Bank transfer completed'),
+    // 'description' => t('returns in this state have been Refund credits through some user action.'),
+    'weight' => -2,
+    'state' => 'completed',
+  );
+  return $return_states;
+}
+
+/**
+ * Implements of hook_commerce_return_status_info_alter().
+ */
+function findit_order_return_commerce_return_status_info_alter(&$status) {
+  $status['pending']['title'] = t('Return initiated');
+  $status['pending']['weight'] = -21;
+  $status['processing']['title'] = t('Return processing');
+  $status['processing']['weight'] = -20;
+  unset($status['completed']);
+  unset($status['canceled']);
+
+  if (user_access('return merchent access') && !user_access('return findit access')) {
+    $alter_status = variable_get('return_status_not_merchant', array());
+    $states = commerce_return_state_get_title();
+    foreach ($alter_status as $key) {
+      $status[$key]['title'] = $states[$status[$key]['state']];
+    }
+  }
+}
+
+/**
+ * Implements of hook_views_query_alter().
+ */
+function findit_order_return_views_query_alter(&$view, &$query) {
+  //fix line item fix at return page.
+  if ($view->name == 'commerce_line_item_table') {
+    $join = new views_join();
+    $join->table = 'commerce_order';
+    $join->field = 'order_id';
+    $join->left_table = 'commerce_line_item';
+    $join->left_field = 'order_id';
+    $join->type = 'left';
+    $query->add_relationship('commerce_order', $join, 'commerce_line_item');
+  }
+  if ($view->name == 'commerce_return_overview_list' && $view->current_display == 'page_2') {
+    $query->add_where(0, 'commerce_return.status', array('pending', 'offline_settlement'), 'NOT IN');
+  }
+  if ($view->name == 'commerce_return_overview_list' && $view->current_display == 'page_4') {
+    $query->add_where(0, 'commerce_return.status', array('credit_refunded', 'bank_refunded'), 'IN');
+  }
+  if ($view->name == 'commerce_return_overview_list' && $view->current_display == 'page_5') {
+    $query->add_where(0, 'commerce_return.status', array('rejected', 'credit_progress', 'bank_progress'), 'IN');
+  }
+}
+
+/**
+ * Implements of hook_services_resources().
+ */
+function findit_order_return_services_resources() {
+
+  $file = array(
+    'type' => 'inc',
+    'module' => 'findit_order_return',
+    'name' => 'classes/finditreturn.classes',
+  );
+  $resources['findit_return_order'] = array(
+    'operations' => array(
+      'create' => array(
+        'help' => t('Exposes API for Quote Flow for return'),
+        'callback' => 'findit_order_return::create',
+        'access callback' => 'findit_order_return::access',
+        'file' => $file,
+        'access callback file' => $file,
+        'access arguments append' => TRUE,
+        'args' => array(
+          array(
+            'name' => 'method',
+            'optional' => TRUE,
+            'type' => 'array',
+            'source' => 'data',
+            'description' => 'The return data to create',
+          ),
+        ),
+      ),
+      'update' => array(
+        'help' => t('Findit update return API'),
+        'file' => $file,
+        'access callback file' => $file,
+        'callback' => 'findit_order_return::update',
+        'access callback' => 'findit_order_return::access',
+        'args' => array(
+          array(
+            'name' => 'id',
+            'type' => 'int',
+            'description' => t('Return ID to Update'),
+            'source' => array('path' => '0'),
+            'optional' => FALSE,
+          ),
+          array(
+            'name' => 'data',
+            'type' => 'string',
+            'description' => t('Data to update'),
+            'source' => 'data',
+            'optional' => FALSE,
+          ),
+        ),
+      )
+    ),
+  );
+  return $resources;
+}
+
+/**
+ * Implements of hook_form_FORM_ID_alter().
+ */
+function findit_order_return_form_commerce_rma_return_form_alter(&$form, &$form_state, $form_id) {
+  findit_order_return_set_adrress($form);
+  $form['#submit'][] = 'order_return_form_submit_handler';
+}
+
+/**
+ * 
+ * @global type $user
+ * @param type $form
+ * @param array $form_state
+ */
+function order_return_form_submit_handler(&$form, &$form_state) {
+  global $user;
+  $return = $form_state['commerce_return'];
+  // Finally, save the return object.
+  if (commerce_return_save($return)) {
+    // Send a message to customer.
+    drupal_set_message(t('- Your request for return @number is confirmed.', array('@number' => $return->return_number)));
+  }
+  else {
+    drupal_set_message(t('Something wrong happened, please contact us'), 'error');
+  }
+  drupal_get_messages('status');
+  drupal_set_message(t('Return created successfully'));
+  // Redirect to user returns.
+  $form_state['redirect'] = 'user/' . $user->uid . '/findit-returns-order';
+}
+
+/*
+ * callback for set address default value.
+ *
+ * @param array $form.
+ *   -drupal form array and pass by reference.
+ *
+ */
+
+function findit_order_return_set_adrress(&$form) {
+  $return = $form['#entity'];
+  if (!$return->return_id) {
+    $order_id = $return->commerce_order_reference[LANGUAGE_NONE]['0']['target_id'];
+    if ($order = commerce_order_load($order_id)) {
+      $shipping_address = $order->field_shipping_address[LANGUAGE_NONE][0];
+      $form['field_return_address'][LANGUAGE_NONE]['0']['#address'] = $shipping_address;
+    }
+  }
+  unset($form['commerce_return_line_items'][LANGUAGE_NONE]['actions']);
+  foreach ($form['commerce_return_line_items'][LANGUAGE_NONE]['line_items'] as $key => $value) {
+    $form['commerce_return_line_items'][LANGUAGE_NONE]['line_items'][$key]['commerce_unit_price']['#access'] = FALSE;
+    $form['commerce_return_line_items'][LANGUAGE_NONE]['line_items'][$key]['commerce_return_method']['#access'] = FALSE;
+    $form['commerce_return_line_items'][LANGUAGE_NONE]['line_items'][$key]['commerce_return_notes']['#access'] = FALSE;
+    $form['commerce_return_line_items'][LANGUAGE_NONE]['line_items'][$key]['commerce_return_line_item_status']['#access'] = FALSE;
+  }
+
+  $form['commerce_customer_rma']['#access'] = 0;
+  $form['field_return_reject_reason']['#access'] = 0;
+  $form['field_rejection_date']['#access'] = 0;
+  $form['field_rejection_image']['#access'] = 0;
+  $form['field_merchant_status']['#access'] = FALSE;
+  $form['field_user_refrence']['#access'] = FALSE;
+  $form['field_return_ref']['#access'] = FALSE;
+}
+
+/**
+ * Implements hook_field_widget_form_alter.
+ */
+function findit_order_return_field_widget_form_alter(&$element, &$form_state, $context) {
+  if (isset($element['#field_name']) && $element['#field_name'] == 'commerce_return_line_items') {
+    // Get permissions of the user who is currently requesting the "update"
+    // mode of the fields.
+    $is_admin = commerce_return_access('update');
+    if ($is_admin) {
+      foreach (element_children($element['line_items']) as $line_item_id) {
+        unset($element['line_items'][$line_item_id]['commerce_return_reason']['#element_validate']);
+        unset($element['line_items'][$line_item_id]['commerce_return_method']['#element_validate']);
+        unset($element['line_items'][$line_item_id]['commerce_return_line_item_status']['#element_validate']);
+      }
+
+      unset($element['#element_validate']);
+      $element['#element_validate'] = array('findit_order_return_line_item_validate');
+    }
+  }
+}
+
+/**
+ * Validate function for return form in popup.
+ */
+function findit_order_return_line_item_validate($element, &$form_state, $form) {
+  $value = array();
+  foreach ($form_state['values']['commerce_return_line_items'][LANGUAGE_NONE]['line_items'] as $key => $line_items) {
+    // If the line item has been marked for deletion...
+    if ($line_items['selected']) {
+      // Add the line item ID to the current value of the reference field.
+      $value[] = array('line_item_id' => $key);
+      $line_item = $line_items['line_item'];
+      // Update the line item based on the values in the additional elements.
+      // Injecting the return reasons and the line item status. Already
+      // validated by their own validator callbacks.
+      $line_item->data['commerce_return'] = array(
+        'reason_tid' => $form_state['values'][$element['#field_name']][$element['#language']]['line_items'][$key]['commerce_return_reason'],
+        'method_tid' => $form_state['values'][$element['#field_name']][$element['#language']]['line_items'][$key]['commerce_return_method'],
+        'notes' => "",
+        'line_item_status' => $form_state['values'][$element['#field_name']][$element['#language']]['line_items'][$key]['commerce_return_line_item_status'],
+      );
+      //print_r($line_item); die;
+      // Only save if values were actually changed.
+      commerce_line_item_save($line_item);
+    }
+  }
+  // No product have been selected, so we are raising a form error.
+  if (empty($value)) {
+    form_error($element, t('You must select at least one product to be returned'));
+  }
+
+  // Set the form values.
+  form_set_value($element, $value, $form_state);
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ *
+ * Extends the CommerceReturn settings to expose the configuration needed by
+ * this module.
+ */
+function findit_order_return_form_commerce_return_settings_alter(&$form, &$form_state, $form_id) {
+  // Attach the default module CSS file to the form.
+  $form['#attached']['css'][] = drupal_get_path('module', 'commerce_rma') . '/theme/commerce_rma.theme.css';
+
+  // Expose the order status and return period.
+  $form['workflow'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Workflow settings'),
+    '#collapsible' => TRUE,
+    '#collapsed' => TRUE,
+    '#access' => user_access('configure return settings'),
+    '#group' => 'return_settings',
+    '#weight' => 1,
+  );
+  $form['workflow']['return_order_workflow'] = array(
+    '#type' => 'textarea',
+    '#title' => t('Order Workflow status'),
+    '#description' => t('Please enter status in enter value comma separated. One workflow in one line.'),
+    '#default_value' => variable_get('return_order_workflow', ''),
+  );
+
+  $statuses = commerce_return_status_options_list();
+  $form['workflow']['return_order_merchant'] = array(
+    '#type' => 'select',
+    '#title' => t('Merchant\'s Operations'),
+    '#description' => t('Please secect statuses'),
+    '#default_value' => variable_get('return_order_merchant', array()),
+    '#multiple' => TRUE,
+    '#options' => $statuses,
+    '#chosen' => FALSE,
+  );
+  $form['workflow']['return_status_not_merchant'] = array(
+    '#type' => 'select',
+    '#title' => t('Statuses not shown to Merchant'),
+    '#description' => t('Please select statuses'),
+    '#default_value' => variable_get('return_status_not_merchant', array()),
+    '#multiple' => TRUE,
+    '#options' => $statuses,
+    '#chosen' => FALSE,
+  );
+  $form['workflow']['return_rejected_order_reason'] = array(
+    '#type' => 'textarea',
+    '#title' => t('Rejected order reason'),
+    '#description' => t('Please enter Reason. One reason in one line.'),
+    '#default_value' => variable_get('return_rejected_order_reason', ''),
+  );
+  $form['workflow']['return_status_not_sync'] = array(
+    '#type' => 'select',
+    '#title' => t('Status Not sync on Market_place'),
+    '#description' => t('Please secect statuses'),
+    '#default_value' => variable_get('return_status_not_sync', array()),
+    '#multiple' => TRUE,
+    '#options' => $statuses,
+    '#chosen' => FALSE,
+  );
+  $form['#submit'][] = 'findit_order_return_commerce_return_settings_submit';
+}
+
+/**
+ * Implement hook_form_submit().
+ *
+ * Hit service to settings ton marketplace
+ */
+function findit_order_return_commerce_return_settings_submit($form, &$form_states) {
+  $values = $form_states['values'];
+  $data = json_encode(array(
+    'return_order_status' => $values['return_order_status'],
+    'return_period_granularity' => $values['return_period_granularity'],
+    'return_period_unit' => $values['return_period_unit'],
+    'type' => 'return_settings',
+  ));
+  $op = 'create';
+  $data = 'data=' . $data . '&op=' . $op;
+  $service = new QueueServicesConnector;
+  $service->queueapiinvoke($data, $op);
+}
+
+/**
+ * Implements of hook_commerce_return_presave().
+ */
+function findit_order_return_commerce_return_presave($return) {
+  if (isset($return->original) && !isset($return->author_webservice) && $return->status != 'pending') {
+    $statuses = variable_get('return_status_not_sync', array());
+    if (!in_array($return->status, $statuses)) {
+      _queueapi_return_invoke($return, 'update');
+    }
+    if ($return->original->status != $return->status) {
+      $statuses = variable_get('return_status_not_merchant', array());
+      if (!in_array($return->status, $statuses)) {
+        $statuses = commerce_return_status_options_list_flat();
+        if ($return->field_merchant_status[LANGUAGE_NONE]['0']['value'] !== "Return item rejected") {
+          $return->field_merchant_status[LANGUAGE_NONE]['0']['value'] = $statuses[$return->status];
+        }
+      }
+    }
+  }
+  if ($return->is_new && !isset($return->author_webservice)) {
+    if ($return->uid == 0) {
+      global $user;
+      $return->uid = $user->uid;
+    }
+  }
+
+  $order_id = $return->commerce_order_reference[LANGUAGE_NONE]['0']['target_id'];
+  $order = commerce_order_load($order_id);
+  $quantity_is_one = 1;
+  foreach ($order->commerce_line_items as $key => $value) {
+    foreach ($value as $lid) {
+      $line_ite_load = commerce_line_item_load($lid['line_item_id']);
+      if (isset($line_ite_load->commerce_product[LANGUAGE_NONE]['0']['product_id'])) {
+        if ($line_ite_load->quantity > 1) {
+          $quantity_is_one = 0;
+        }
+      }
+    }
+  }
+  if ($quantity_is_one) {
+    $return->commerce_return_total = $order->commerce_order_total;
+  }
+}
+
+/**
+ * Implements of hook_entity_insert().
+ */
+function findit_order_return_commerce_return_insert($return) {
+  if (!isset($return->author_webservice)) {
+    _queueapi_return_invoke($return, 'create');
+  }
+}
+
+/*
+ * Callback for invoke service for syncing
+ *
+ * @param object $return
+ *    object of commerce_return entity.
+ * @param  string $op
+ *   name of operation.
+ */
+
+function _queueapi_return_invoke($return, $op = 'create') {
+  //$store = serialize($return->commerce_store);
+  foreach ($return->commerce_return_line_items as $key => $value) {
+    foreach ($value as $lid) {
+      $line_ite_load = commerce_line_item_load($lid['line_item_id']);
+      if (isset($line_ite_load->commerce_product[LANGUAGE_NONE]['0']['product_id'])) {
+        $line_item_array[] = array(
+          "product_id" => $line_ite_load->commerce_product[LANGUAGE_NONE]['0']['product_id'],
+          "quantity" => $line_ite_load->quantity,
+          'data' => $line_ite_load->data,
+          'sku' => $line_ite_load->line_item_label,
+        );
+      }
+    }
+  }
+  $order_id = $return->commerce_order_reference[LANGUAGE_NONE]['0']['target_id'];
+  $uid = $return->uid;
+  if (isset($return->commerce_customer_rma) && isset($return->commerce_customer_rma[LANGUAGE_NONE])) {
+
+    $shipping_address_id = $return->commerce_customer_rma[LANGUAGE_NONE]['0']['profile_id'];
+    if ($shipping_address_id) {
+      $shipping_address_load = commerce_customer_profile_load($shipping_address_id);
+      if ($shipping_address_load) {
+        $shipping_address = $shipping_address_load->commerce_customer_address;
+      }
+    }
+  }
+  else if (isset($return->return_address)) {
+    $shipping_address = $return->commerce_customer_address;
+  }
+  if ($order = commerce_order_load($order_id)) {
+    if (isset($order->field_order_refrence) && $order->field_order_refrence[LANGUAGE_NONE]['0']['value']) {
+      $order_id = $order->field_order_refrence[LANGUAGE_NONE]['0']['value'];
+    }
+    if (isset($order->field_user_refrence) && $order->field_user_refrence[LANGUAGE_NONE]['0']['value']) {
+      $uid = $order->field_user_refrence[LANGUAGE_NONE]['0']['value'];
+    }
+  }
+
+  $data = drupal_json_encode(array(
+    'type' => $return->type,
+    'status' => $return->status,
+    'return_id' => $return->return_id,
+    'return_ref' => isset($return->field_return_ref[LANGUAGE_NONE]['0']) ? $return->field_return_ref[LANGUAGE_NONE]['0']['value'] : 0,
+    'user' => $uid,
+    'line_item' => $line_item_array,
+    'return_total' => $return->commerce_return_total,
+    'order_ref' => $order_id,
+    'shiping_address' => isset($shipping_address) ? $shipping_address : NULL,
+    'status' => $return->status,
+    'refrence_order_id' => (isset($return->field_return_ref[LANGUAGE_NONE]['0']) && $return->field_return_ref[LANGUAGE_NONE]['0']['value'] != '') ? $return->field_return_ref[LANGUAGE_NONE]['0']['value'] : 1,
+  ));
+  $data = 'data=' . $data . '&op=' . $op;
+  $service = new QueueServicesConnector;
+  $service->queueapiinvoke($data, $op);
+}
+
+/**
+ * get next not available status of return.
+ *
+ * @param array $statuses
+ *   - all statuses of return.
+ * @param object $return
+ *   - return object
+ *
+ * @return array $snext_statuses
+ *  - return disable status of return.
+ *
+ */
+function return_get_next_available_status($statuses, $return) {
+  static $snext_statuses = array();
+  if (isset($snext_statuses[$return->status])) {
+    return $snext_statuses[$return->status];
+  }
+  $next_status = $statuses;
+  $workflow_stirng = trim(variable_get('return_order_workflow', ''));
+  if ($workflow_stirng != '') {
+    $workflows = preg_split('/\r\n|\r|\n/', $workflow_stirng);
+    foreach ($workflows as $key => $val) {
+      $workflows[$key] = explode(',', $val);
+    }
+
+    $status = $return->status;
+    $next_statuses = array();
+    foreach ($workflows as $data) {
+      $key = array_search($status, $data);
+      if ($key != NULL || $key === 0) {
+        $nkey = $key + 1;
+        if (isset($data[$nkey])) {
+          $next_statuses[] = $data[$nkey];
+        }
+      }
+    }
+    if (user_access('return merchent access') && !user_access('return findit access')) {
+      $m_actions = variable_get('return_order_merchant', array());
+      if (!empty($m_actions)) {
+        foreach ($next_statuses as $key => $nstatus) {
+          if ($return->status != $nstatus && !in_array($nstatus, $m_actions)) {
+            // $key = array_search($status, $data);
+            unset($next_statuses[$key]);
+          }
+        }
+      }
+    }
+    $next_status = array();
+    foreach (array_unique($next_statuses) as $key => $status) {
+      if (isset($statuses[$status])) {
+        $next_status[$status] = $statuses[$status];
+      }
+    }
+  }
+  $snext_statuses[$return->status] = $next_status;
+  return $snext_statuses[$return->status];
+}
+
+/**
+ * Implements hook_menu_alter().
+ */
+function findit_order_return_menu_alter(&$items) {
+  $items['admin/commerce/orders/%commerce_order/edit/return']['access callback'] = '_order_return_access';
+}
+
+function _order_return_access($op, CommerceReturn $return = NULL, $account = NULL) {
+  $order_id = arg(3);
+  $order_obj = commerce_order_load($order_id);
+  $order_status = $order_obj->status;
+  if ($order_status != 'completed') {
+    return FALSE;
+  }
+
+  return commerce_entity_access($op, $return, $account, 'commerce_return');
+}
+
+// /**
+//  * Implements hook_form_alter().
+//  */
+function findit_order_return_form_alter(&$form, &$form_state, $form_id) {
+  if ($form_id == 'commerce_rma_return_review_form') {
+    foreach ($form_state['commerce_return']->field_image_return['und'] as $key => $file) {
+      $form_state['commerce_return']->field_image_return['und'][$key] = (array) file_load($file['fid']);
+    }
+  }
+}
+
+/**
+ * Implements hook_block_info.
+ */
+function findit_order_return_block_info() {
+  $blocks['create_return_link'] = array(
+    'info' => t('Create New Return'),
+    'cache' => DRUPAL_NO_CACHE,
+  );
+  return $blocks;
+}
+
+/**
+ * Implements hook_block_view.
+ */
+function findit_order_return_block_view($delta = '') {
+  $block = array();
+
+  if ($delta == 'create_return_link') {
+    $block['subject'] = '';
+    // Get renderable structure.
+    $block['content'] = findit_order_return_create_link(arg(3));
+  }
+  return $block;
+}
+
+/**
+ *
+ * @param type $order_id
+ */
+function findit_order_return_create_link($order_id) {
+  if ($order_id) {
+    $destination = drupal_get_destination();
+    global $user;
+    $order = commerce_order_load($order_id);
+    if (isset($order->uid)) {
+      if (commerce_rma_access('create', NULL, $user, $order)) {
+        return l("Create Return", 'user/' . $user->uid . '/orders/' . $order->order_id . '/return/add', array('query' => array('destination' => $destination['destination'])));
+      }
+    }
+  }
+  return NULL;
+}
+
+/**
+ * 
+ * @return type
+ */
+function findit_order_return_get_lineitem_cost($order_id) {
+  $query = db_select('commerce_line_item', 'li');
+  $query->condition('li.order_id', $order_id);
+  $query->condition('li.type', 'product');
+  $query->fields('cup', array('commerce_unit_price_amount'));
+  $query->join('field_data_commerce_unit_price', 'cup', 'cup.entity_id=li.line_item_id');
+  return $query->execute()->fetchField();
+}

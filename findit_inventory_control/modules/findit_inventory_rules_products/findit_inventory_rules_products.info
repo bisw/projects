@@ -1,0 +1,4 @@
+name = Findit Inventory Control System for Products
+description = This module manages Inventory rules for products in Findit
+core = 7.x
+package = Findit

@@ -1,0 +1,8 @@
+name = Marketplace Service Expose
+description = Implements FINDIT API for sinking database.
+package = Findit Custom API Modules
+dependencies[] = services
+dependencies[] = commerce
+core = 7.x
+
+

@@ -1,0 +1,4 @@
+name = Findit Services
+description = Findit services admin configuration
+core = 7.x
+package = Findit Custom API Modules

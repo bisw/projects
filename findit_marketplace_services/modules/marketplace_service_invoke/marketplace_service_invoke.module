@@ -1,0 +1,126 @@
+<?php
+
+module_load_include('inc', 'marketplace_service_invoke', 'classes/marketplace_service_invoke');
+/**
+ * @file
+ * Provides very limited functionality().
+ */
+
+/**
+ * Implements hook_commerce_product_calculate_sell_price_line_item_alter().
+ */
+function marketplace_service_invoke_commerce_cart_line_item_refresh($line_item, $order_wrapper) {
+  global $language;
+  if (isset($line_item->field_association[LANGUAGE_NONE]['0']['value'])) {
+    $productSku = _get_product_sku_from_id($line_item->commerce_product[LANGUAGE_NONE]['0']['product_id']);
+    $association = product_load_by_association_id($line_item->field_association[LANGUAGE_NONE]['0']['value'], $productSku);
+    $line_item->commerce_unit_price[LANGUAGE_NONE]['0']['amount'] = $association[0]->price * 100;
+    $line_item->commerce_unit_price[LANGUAGE_NONE]['0']['data']['components']['0']['price']['amount'] = $association[0]->price * 100;
+  }
+}
+
+/**
+ *
+ * @return string
+ */
+function marketplace_service_invoke_menu() {
+  $items = array();
+  $items['admin/config/findit/api'] = array(
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('marketplace_service_invoke_settings_form'),
+    'access callback' => TRUE,
+    'file' => 'findit_commerce.admin.inc',
+  );
+  return $items;
+}
+
+/**
+ * Implements of hook_services_resources().
+ */
+function marketplace_service_invoke_services_resources() {
+  $api = array(
+    'marketplace_service_invoke' => array(
+      'operations' => array(
+        'create' => array(
+          'help' => t('Exposes api for receiving packages from queue.'),
+          'file' => array(
+            'inc',
+            'findit_messaging_queue',
+            'classes/queue_services_connector',
+          ),
+          'callback' => 'QueueServicesConnector::queueapireceiver',
+          'access callback' => 'QueueServicesConnector::queueaccess',
+          'access arguments append' => TRUE,
+          'args' => array(
+            array(
+              'name' => 'method',
+              'optional' => TRUE,
+              'type' => 'array',
+              'source' => 'data',
+              'description' => t("Data to perform operation on"),
+            ),
+            array(
+              'name' => 'op',
+              'optional' => TRUE,
+              'type' => 'string',
+              'source' => 'data',
+              'description' => t('Crud operation to perform'), //Ex:order,discount etc
+            ),
+          ),
+        ),
+      ),
+    ),
+    'send_order_to_queue' => array(
+      'operations' => array(
+        'create' => array(
+          'help' => t('Service to send data to queue after order complition.'),
+          'file' => array(
+            'inc',
+            'marketplace_service_invoke',
+            'classes/marketplace_service_invoke',
+          ),
+          'callback' => 'SendOrderToQueue::create',
+          'access callback' => 'SendOrderToQueue::access',
+          'access arguments append' => TRUE,
+          'args' => array(
+            array(
+              'name' => 'data',
+              'optional' => TRUE,
+              'type' => 'array',
+              'source' => 'data',
+              'description' => t("Order data array"),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  return $api;
+}
+
+/**
+ * Implements hook_commerce_order_presave().
+ * @param type $order.
+ */
+function marketplace_service_invoke_commerce_order_presave($order) {
+  global $base_url;
+  if ((($order->status == "processing") || ($order->status == "cod_processing")) && (!isset($order->field_order_refrence[LANGUAGE_NONE]))) {
+    $options = array(
+      'method' => 'POST',
+      'headers' => array('Content-Type' => 'application/json'),
+      'data' => drupal_json_encode($order),
+    );
+    $url = $base_url . '/api_market/send_order_to_queue';
+    $request = background_process_http_request($url, $options);
+  }
+}
+
+function product_load_by_association_id($id, $sku) {
+  $query = db_select('eck_association', 'ea');
+  $query->join('commerce_store', 'cs', 'cs.unique_store_id = ea.unique_store_id');
+  $query->fields('ea', array('id', 'price', 'unique_store_id'))
+      ->condition('cs.store_id', $id)
+      ->condition('ea.sku', $sku);
+  $result = $query->execute()->fetchAll();
+  return $result;
+}

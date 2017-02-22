@@ -1,0 +1,270 @@
+<?php
+
+/**
+ * @file
+ * Defines menu items common to the various Drupal Commerce UI modules.
+ */
+/* * ****************************************************************************
+ * Sign in with services API
+ * sign in using email account / Resource definition
+ * **************************************************************************** */
+module_load_include('inc', 'findit_marketplace_services', 'classes/finditorder.classes');
+/* * ****************************************************************************
+ * Implements of hook_services_resources().
+ * **************************************************************************** */
+
+function marketplace_service_expose_services_resources() {
+  $resources['findit_sender'] = array(
+    'operations' => array(
+      'create' => array(
+        'help' => t('Findit API to send message queue in rabbit queue'),
+        'file' => array('inc', 'findit_messaging_queue', 'classes/queue_services_connector'),
+        'callback' => 'QueueServicesConnector::sendtoqueue',
+        'access callback' => 'QueueServicesConnector::queueaccess',
+        'access arguments append' => TRUE,
+        'args' => array(
+          array(
+            'name' => 'data',
+            'optional' => TRUE,
+            'type' => 'array',
+            'source' => 'data',
+            'description' => 'Receive data from services and pass to rabbitmq message',
+          ),
+          array(
+            'name' => 'op',
+            'type' => 'string',
+            'description' => t('operation to perform'),
+            'source' => 'data',
+            'optional' => FALSE,
+          ),
+        ),
+      ),
+    ),
+  );
+
+  $resources['findit_order_update'] = array(
+    'operations' => array(
+      'update' => array(
+        'help' => t('Findit update order api'),
+        //  'file' => array('inc','findit_marketplace_services','classes/finditorder.classes'),
+        'callback' => 'findit_commerce_order::update',
+        'access callback' => 'findit_commerce_order::access',
+        'args' => array(
+          array(
+            'name' => 'id',
+            'type' => 'int',
+            'description' => t('Order ID to Update'),
+            'source' => array('path' => '0'),
+            'optional' => FALSE,
+          ),
+          array(
+            'name' => 'data',
+            'type' => 'string',
+            'description' => t('Data to update'),
+            'source' => 'data',
+            'optional' => FALSE,
+          ),
+        ),
+      ),
+    ),
+  );
+
+  $resources['best_seller'] = array(
+    'operations' => array(
+      'retrieve' => array(
+        'help' => 'Retrieves Best Seller Block',
+        'callback' => '_findit_get_best_seller_by_lang',
+        'access callback' => 'user_access',
+        'access arguments' => array('access content'),
+        'access arguments append' => FALSE,
+        'args' => array(
+          array(
+            'name' => 'lang',
+            'type' => 'text',
+            'description' => 'Language code',
+            'source' => array(
+              'path' => '0'
+            ),
+            'optional' => TRUE,
+            'default' => '0',
+          ),
+        ),
+      ),
+    ),
+  );
+
+  $resources['product_search'] = array(
+    'operations' => array(
+      'retrieve' => array(
+        'help' => 'Retrieves Product Search Result',
+        'callback' => '_findit_get_product_search_result',
+        'access callback' => 'user_access',
+        'access arguments' => array('access content'),
+        'access arguments append' => FALSE,
+        'args' => array(
+          array(
+            'name' => 'lang',
+            'type' => 'text',
+            'description' => 'Language code',
+            'source' => array(
+              'path' => '0'
+            ),
+            'optional' => TRUE,
+            'default' => '0',
+          ),
+          array(
+            'name' => 'string',
+            'type' => 'string',
+            'description' => 'Search string',
+            'source' => array(
+              'path' => '1'
+            ),
+            'optional' => TRUE,
+            'default' => '0',
+          ),
+          array(
+            'name' => 'size',
+            'type' => 'id',
+            'description' => 'Number of result to show',
+            'source' => array(
+              'path' => '2'
+            ),
+            'optional' => TRUE,
+            'default' => '0',
+          ),
+        ),
+      ),
+    ),
+  );
+  $resources['legecy_quickview'] = array(
+    'operations' => array(
+      'retrieve' => array(
+        'help' => 'Retrieves Quickview details of a product',
+        'callback' => '_findit_get_quickview_product_info',
+        'access callback' => 'user_access',
+        'access arguments' => array('access content'),
+        'access arguments append' => FALSE,
+        'args' => array(
+          array(
+            'name' => 'noj',
+            'type' => 'string',
+            'description' => 'noj',
+            'source' => array(
+              'path' => '0'
+            ),
+            'optional' => TRUE,
+            'default' => '0',
+          ),
+          array(
+            'name' => 'product_id',
+            'type' => 'int',
+            'description' => 'Product Id',
+            'source' => array(
+              'path' => '1'
+            ),
+            'optional' => TRUE,
+            'default' => '0',
+          ),
+        ),
+      ),
+    ),
+  );
+
+  return $resources;
+}
+
+function _findit_get_quickview_product_info($noj, $product_id) {
+  $quickview['quickview'] = views_embed_view('findit_products', 'page_2', $product_id);
+  return $quickview;
+}
+
+/**
+ * 
+ * @param type $lang
+ * @return type
+ */
+function _findit_get_best_seller_by_lang($lang) {
+  global $base_url;
+  $skus = array();
+  $best_seller = array();
+  $media_path = variable_get('image_media_path', 'http://pim-devfindit.s115.srijan-sites.com/media/');
+  $skus = findit_get_product_sku_by_node($lang);
+  $fields = array('title', 'field_default_seller', 'field_default_price', 'akeneo_image_small', 'field_total_rating', 'field_product_rating', 'commerce_price:amount_decimal');
+  foreach ($skus as $sku) {
+    $product = findit_elastic_boost_query('product_sku', FALSE, $sku, FALSE, FALSE, FALSE, FALSE, FALSE, $fields, FALSE, FALSE, 1);
+    $image_path = $product['hits']['hits'][0]['fields']['akeneo_image_small'][0];
+    $thumbnail_path = str_replace('$image_media', $media_path, $image_path);
+    $product['hits']['hits'][0]['fields']['akeneo_image_small'][0] = $thumbnail_path;
+    $product['hits']['hits'][0]['fields']['product_url'][0] = $base_url . '/' . create_product_link_based_on_sku($sku);
+    $best_seller[$sku] = $product;
+  }
+  $best_seller['view_all_url'] = $base_url;
+  // $output = drupal_json_encode($best_seller);
+  return $best_seller;
+}
+
+/**
+ * 
+ * @param type $lang
+ * @return type
+ */
+function findit_get_product_sku_by_node($lang = 'en') {
+  $sku = array();
+  $query = db_select('node', 'n');
+  $query->leftjoin('field_data_field_findit_block_type', 'blt', 'blt.entity_id = n.nid');
+  $query->leftjoin('field_data_field_top_sellers', 'ts', 'ts.entity_id = blt.field_findit_block_type_value');
+  $query->leftjoin('field_data_field_add_product_sku', 'sku', 'sku.entity_id = ts.field_top_sellers_value');
+  $query->leftjoin('commerce_product', 'cp', 'cp.product_id = sku.field_add_product_sku_product_id');
+  $query->condition('n.type', 'findit_home_page', '=');
+  $query->condition('n.language', $lang, '=');
+  $query->distinct();
+  $query->fields('cp', array('sku'));
+
+  $result = $query->execute();
+  while ($record = $result->fetchAssoc()) {
+    if ($record['sku']) {
+      $sku[] = $record['sku'];
+    }
+  }
+  return $sku;
+}
+
+/**
+ * 
+ * @param type $lang
+ * @param type $string
+ * @param type $size
+ * @return type
+ */
+function _findit_get_product_search_result($lang, $string, $size = 1000) {
+  global $base_url;
+  $result = '';
+  $client = fincit_es_get_elastic_connection();
+  $searchParams = array();
+  $searchParams['index'] = variable_get('elastic_index_name', NULL);
+  $searchParams['body']['size'] = $size;
+  //$searchParams['body']['query']['match']['_all'] = "Orange";   
+  $searchParams['body']['query']['filtered']['query']['query_string']['query'] = $string;
+  $searchParams['body']['query']['filtered']['filter']['term']['language'] = $lang;
+
+  $fields = array('title', 'field_default_seller', 'field_default_price', 'akeneo_image_small', 'field_total_rating', 'field_product_rating', 'commerce_price:amount_decimal', 'sku');
+  $searchParams['body']['fields'] = $fields;
+  $params['body']['sort']['field_default_price'] = array('order' => 'desc');
+  $results = $client->search($searchParams);
+
+  $media_path = variable_get('image_media_path', 'http://pim-devfindit.s115.srijan-sites.com/media/');
+  foreach ($results['hits']['hits'] as $key => $item) {
+    $sku = $item['fields']['sku'][0];
+    $image_path = $item['fields']['akeneo_image_small'][0];
+    $thumbnail_path = str_replace('$image_media', $media_path, $image_path);
+    $results['hits']['hits'][$key]['fields']['akeneo_image_small'][0] = $thumbnail_path;
+    $results['hits']['hits'][$key]['fields']['product_url'][0] = $base_url . '/' . create_product_link_based_on_sku($sku);
+  }
+  if (count($results['hits']['hits']) > 0) {
+    $results['view_all_url'] = $base_url . '/all-products?search=' . $string;
+    return $results;
+  }
+  else {
+    return t('No result found.');
+  }
+}

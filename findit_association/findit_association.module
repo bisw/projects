@@ -1,0 +1,2342 @@
+<?php
+
+global $base_url;
+define('ASSO_SESS', 'product');
+define('ASSO_EDIT_SESS', 'edit-product');
+define('ASSO_UPDATE_URL', $base_url . '/updateassociation');
+define('SKU_DETAIL_URL', $base_url . '/product/%s/%s');
+
+function findit_association_init() {
+  $_SESSION['seller_additional_notes'] = array('note_0' => variable_get('note_0', '100% Genuine Products'),
+    'note_1' => variable_get('note_1', 'Free Shipping'),
+    'note_2' => variable_get('note_2', 'Replacement Warranty'));
+}
+
+function findit_association_preprocess_page(&$variables) {
+  global $user;
+  if (isUser('merchant')) {
+    if (!isset($user->store)) {
+
+      $query = db_select('commerce_store', 'cs');
+      $query->fields('cs', array('store_id'));
+      $query->condition('cs.uid', $user->uid);
+      $query->orderBy('created', 'ASC');
+      $store = $query->execute()->fetchObject();
+
+      if (isset($store->store_id)) {
+        $user->store = entity_load_single('commerce_store', $store->store_id);
+        if ($user->store->status == 0) {
+          drupal_set_message('Account is currently deactivated. to activate it please contact your category manager or write to (findituser@srijan.in)', 'error');
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_menu().
+ */
+function findit_association_menu() {
+  $items = array();
+  $items['user/%user/astores'] = array(
+    'title' => 'Stores',
+    'description' => 'My Store list',
+    'page callback' => 'findit_admin_store_list',
+    'page arguments' => array(1),
+    'access arguments' => array('store_admin'),
+    'type' => MENU_LOCAL_TASK,
+  );
+  $items['astore/%commerce_store/associations'] = array(
+    'title' => 'Association List',
+    'description' => 'My Store list',
+    'page callback' => 'findit_admin_store_association_list',
+    'page arguments' => array(1),
+    'access arguments' => array('store_admin'),
+    'type' => MENU_CALLBACK,
+  );
+  $items['astore/%commerce_store/details'] = array(
+    'title' => 'Store Detail',
+    'description' => 'Store Detail',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('findit_admin_store_detail', 1),
+    'access arguments' => array('store_admin'),
+    'type' => MENU_CALLBACK,
+  );
+
+  $items['astore/%commerce_store/%/status'] = array(
+    //'title' => 'Active',
+    'description' => 'Active/Deactivate Store',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('findit_accociation_update_status', 1, 2),
+    'access arguments' => array('store_admin'),
+    'type' => MENU_CALLBACK,
+  );
+
+  /*   * *
+   * Menu for merchant
+   * store listing
+   * association listing with search
+   * choose association for add to cart
+   * Proceed to cart
+   * save associations
+   */
+
+  $items['merchant/stores'] = array(
+    'title' => 'Merchant Store',
+    'description' => 'List of merchant store',
+    'page callback' => 'findit_merchant_store_list',
+    'page arguments' => array(1),
+    'access arguments' => array('store_merchant'),
+    'type' => MENU_LOCAL_TASK,
+    'file' => 'includes/findit_merchant.pages.inc',
+  );
+
+  $items['merchant/%commerce_store/associations'] = array(
+    'title' => 'Merchant Association',
+    'description' => 'List of merchant assocition',
+    'page callback' => 'findit_merchant_association_list',
+    'page arguments' => array(1),
+    'access arguments' => array('store_merchant'),
+    'type' => MENU_LOCAL_TASK,
+    'file' => 'includes/findit_merchant.pages.inc',
+  );
+
+  $items['merchant/%commerce_store/association/processcart'] = array(
+    'title' => 'Merchant Association Edit',
+    'description' => 'Merchant assocition edit',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('findit_merchant_association_processcart', 1),
+    'access callback' => 'findit_merchant_valid_store_permission',
+    'access arguments' => array('store_merchant'),
+    'type' => MENU_CALLBACK,
+    'file' => 'includes/findit_merchant.pages.inc',
+  );
+
+  $items['merchant/association/service'] = array(
+    'title' => 'Merchant Association',
+    'page callback' => 'findit_merchant_association_service',
+    'access arguments' => array('store_merchant'),
+    'type' => MENU_CALLBACK,
+    'file' => 'includes/findit_merchant.pages.inc',
+  );
+
+  $items['merchant/seller-contact'] = array(
+    'title' => 'Merchant Association',
+    'page callback' => 'findit_merchant_seller_contact',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+  );
+
+  /*   * ***** menu according to theme ******* */
+  $items['merchant/%commerce_store/inventory/all'] = array(
+    'title' => 'Merchant Association',
+    'description' => 'List of merchant assocition',
+    'page callback' => 'findit_merchant_inventory_list',
+    'page arguments' => array(1, 3),
+    'access arguments' => array('store_merchant'),
+    'type' => MENU_LOCAL_TASK,
+    'file' => 'includes/findit_merchant.new.inc',
+  );
+
+  $items['merchant/%commerce_store/inventory/deplete'] = array(
+    'title' => 'Merchant Association',
+    'description' => 'List of merchant assocition',
+    'page callback' => 'findit_merchant_inventory_list',
+    'page arguments' => array(1, 3),
+    'access arguments' => array('store_merchant'),
+    'type' => MENU_LOCAL_TASK,
+    'file' => 'includes/findit_merchant.new.inc',
+  );
+
+  $items['merchant/%commerce_store/inventory/archive'] = array(
+    'title' => 'Merchant Association',
+    'description' => 'List of merchant assocition',
+    'page callback' => 'findit_merchant_inventory_list',
+    'page arguments' => array(1, 3),
+    'access arguments' => array('store_merchant'),
+    'type' => MENU_LOCAL_TASK,
+    'file' => 'includes/findit_merchant.new.inc',
+  );
+
+  $items['merchant/%commerce_store/inventory/add'] = array(
+    'title' => 'Merchant Association',
+    'page callback' => 'findit_merchant_inventory_add',
+    'page arguments' => array(1, 3),
+    'access callback' => 'findit_merchant_valid_store_permission',
+    'access arguments' => array('store_merchant'),
+    'type' => MENU_LOCAL_TASK,
+    'file' => 'includes/findit_merchant.new.inc',
+  );
+
+  $items['merchant/allassociation/autocomplete/%'] = array(
+    'page callback' => 'findit_merchant_allassociation_autocomplete',
+    'access arguments' => array('store_merchant'),
+    'type' => MENU_CALLBACK,
+    'file' => 'includes/findit_merchant.pages.inc',
+  );
+
+  $items['merchant/association/autocomplete/%'] = array(
+    'page callback' => 'findit_merchant_association_autocomplete',
+    'access arguments' => array('store_merchant'),
+    'type' => MENU_CALLBACK,
+    'file' => 'includes/findit_merchant.pages.inc',
+  );
+
+  $items['merchant/%commerce_store/inventory/%ctools_js'] = array(
+    'page callback' => 'findit_merchant_association_viewlist',
+    'page arguments' => array(1, 4),
+    'access arguments' => array('store_merchant'),
+    'type' => MENU_CALLBACK,
+    'file' => 'includes/findit_merchant.new.inc',
+  );
+
+  $items['merchant/%commerce_store/inventory/processcart'] = array(
+    'title' => 'Merchant Inventory Edit',
+    'description' => 'Merchant assocition edit',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('findit_merchant_inventory_processcart', 1),
+    'access callback' => 'findit_merchant_valid_store_permission',
+    'access arguments' => array('store_merchant'),
+    'type' => MENU_CALLBACK,
+    'file' => 'includes/findit_merchant.new.inc',
+  );
+
+  $items['admin/commerce/config/association-sellernotes'] = array(
+    'title' => 'Association Seller Notes',
+    'description' => 'Association Seller Notes',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('findit_association_seller_notes_admin_setting_form'),
+    'access arguments' => array('seller_note_config'),
+  );
+
+  $items['merchant/%commerce_store/inventory/bulkupload'] = array(
+    'title' => 'Association Bulk Upload',
+    'description' => 'Association Bulk Upload',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('findit_association_bulk_upload', 1),
+    'access callback' => 'findit_merchant_valid_store_permission',
+    'access arguments' => array('store_merchant'),
+    'type' => MENU_CALLBACK,
+    'file' => 'includes/findit_merchant.new.inc',
+  );
+
+  $items['merchant/inventory/download'] = array(
+    'title' => 'Download Association',
+    'description' => 'Download Association',
+    'page callback' => '_findit_association_download_file',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+    'file' => 'includes/findit_merchant.new.inc',
+  );
+
+  return $items;
+}
+
+/**
+ * 
+ * @global type $user
+ * @param type $permission
+ * @param type $account
+ * @return boolean
+ */
+function findit_merchant_valid_store_permission($permission, $account = NULL) {
+  if (empty($account)) {
+    global $user;
+    $account = $user;
+  }
+
+  // Check if store is active and has store_merchant access.
+  if (user_access('store_merchant', $account) && findit_store_management_check_active_store($account->uid)) {
+    return TRUE;
+  }
+  return FALSE;
+}
+
+function findit_association_seller_notes_admin_setting_form() {
+
+  $form = array();
+  $form['note_0'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Note 1'),
+    '#required' => TRUE,
+    '#description' => t('Please Enter Note 1.'),
+    '#default_value' => variable_get('note_0', '100% Genuine Products'),
+  );
+  $form['note_1'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Note 2'),
+    '#required' => TRUE,
+    '#description' => t('Please Enter Note 2.'),
+    '#default_value' => variable_get('note_1', 'Free Shipping'),
+  );
+  $form['note_2'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Note 3'),
+    '#required' => TRUE,
+    '#description' => t('Please Enter Note 3.'),
+    '#default_value' => variable_get('note_2', 'Replacement Warranty'),
+  );
+  return system_settings_form($form);
+}
+
+function findit_association_theme($existing, $type, $theme, $path) {
+  $module_path = drupal_get_path('module', 'findit_association') . '/template';
+  return array(
+    'findit_association_globalsearch_form' => array(
+      'arguments' => array('form' => NULL),
+      'template' => 'template/globalsearch',
+      'render element' => 'form'
+    ),
+    'findit_merchant_association_search_new_form' => array(
+      'arguments' => array('form' => NULL),
+      'template' => 'template/associationsearch',
+      'render element' => 'form'
+    ),
+    'findit_detail_block' => array(
+      'arguments' => array('store' => NULL, 'user' => NULL, 'profile' => NULL, 'rating' => NULL),
+      'template' => 'template/findit-detail-block',
+    //'render element' => 'form'
+    ),
+  );
+}
+
+function findit_merchant_seller_contact() {
+
+  $params = array();
+  $from = variable_get('site_mail', ini_get('sendmail_from'));
+  $params['pet_from'] = $from;
+  // Email for testing //
+  $params['pet_bcc'] = 'anand.vyas@srijan.in';
+
+  $data = $_POST;
+  $pet = pet_load('direct_contact_to_seller');
+  if (isset($pet->pid)) {
+
+    //get seller email address
+    $query = db_select('commerce_store', 'cs');
+    $query->fields('cs', array('store_id', 'unique_store_id', 'uid', 'title'));
+    $query->fields('u', array('mail', 'name'));
+    $query->leftJoin('users', 'u', 'u.uid = cs.uid');
+    $query->condition('cs.unique_store_id', $data['seller']);
+    $seller = $query->execute()->fetchObject();
+
+    if ($seller) {
+
+      $message = '<br/>Name: ' . $data['name'];
+      $message .= '<br/>Email: ' . $data['e_mail'];
+      $message .= '<br/>subject: ' . $data['subject'];
+      $message .= '<br/>your_review: ' . $data['your_review'];
+      if ($data['image'] != '')
+        $message .= sprintf('<br/><img src="%s" />', $data['image']);
+
+      $params['pet_to'] = $seller->mail;
+      $params['pet_data'] = array('message' => $message);
+
+      pet_send_one_mail($pet, $params);
+      $result['msg'] = sprintf('mail sent');
+      $result['type'] = 'success';
+    }else {
+      $result['msg'] = sprintf('seller mail address not found');
+      $result['type'] = 'error';
+    }
+  }
+  else {
+    $result['msg'] = sprintf('direct_contact_to_seller mail template not set');
+    $result['type'] = 'error';
+  }
+  echo json_encode($result);
+  exit;
+}
+
+function findit_association_permission() {
+  return array(
+    'store_admin' => array(
+      'title' => t('Store Administer'),
+      'description' => t('Perform administration tasks on Findit Product Association module.'),
+    ),
+    'store_merchant' => array(
+      'title' => t('Store Merchant'),
+      'description' => t('Access product association interface and associate products.'),
+    ),
+    'seller_note_config' => array(
+      'title' => t('Seller Note Config'),
+      'description' => t('Access for seller note configuration.'),
+    ),
+  );
+}
+
+function findit_admin_store_list() {
+  $output = '';
+  if (!isset($_REQUEST['table']) && !isset($_REQUEST['confirm_first_time'])) {
+    $storeSearch = drupal_get_form('findit_store_search');
+    $output .= drupal_render($storeSearch);
+  }
+  $storeListForm = drupal_get_form('findit_admin_store_list_form');
+  $output .= drupal_render($storeListForm);
+  return $output;
+}
+
+/* * * Store list with searching *** */
+
+function findit_store_search($form, &$form_state) {
+  global $user;
+
+  $form = array();
+  $form['filters'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Filters')
+  );
+  $form['filters']['title'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Store Title'),
+    '#size' => 25,
+    '#default_value' => isset($_GET['title']) ? $_GET['title'] : '',
+    '#description' => t('Enter Store Title'),
+  );
+  $form['filters']['store_id'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Store ID'),
+    '#size' => 25,
+    '#default_value' => isset($_GET['store_id']) ? $_GET['store_id'] : '',
+    '#description' => t('Enter Store ID'),
+  );
+  $form['filters']['name'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Merchant Name'),
+    '#size' => 25,
+    '#default_value' => isset($_GET['name']) ? $_GET['name'] : '',
+    '#description' => t('Enter Merchant Name'),
+  );
+  $form['filters']['email'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Merchant Email'),
+    '#size' => 25,
+    '#default_value' => isset($_GET['email']) ? $_GET['email'] : '',
+    '#description' => t('Enter Merchant Email'),
+  );
+  $form['filters']['mobile'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Merchant Mobile'),
+    '#size' => 25,
+    '#default_value' => isset($_GET['mobile']) ? $_GET['mobile'] : '',
+    '#description' => t('Enter Merchant Mobile Number'),
+  );
+
+  $form['filters']['sku'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Product SKU'),
+    '#size' => 25,
+    '#default_value' => isset($_GET['sku']) ? $_GET['sku'] : '',
+    '#description' => t('Enter Product SKU'),
+  );
+
+  $category = variable_get('findit_product_association_vocabulary', 'product_category');
+  $vid = db_query('SELECT vid FROM {taxonomy_vocabulary} WHERE machine_name = :machine_name', array(':machine_name' => $category))->fetchField();
+
+  $form['filters']['category'] = array(
+    '#type' => 'hierarchical_select',
+    '#title' => t('Select Category'),
+    '#size' => 1,
+    '#default_value' => isset($_GET['category']) ? $_GET['category'] : '',
+    '#description' => t('Select a Category'),
+    '#config' => array(
+      'module' => 'hs_taxonomy',
+      'params' => array(
+        'vid' => $vid,
+      ),
+      'save_lineage' => 0,
+      'enforce_deepest' => 0,
+      'entity_count' => 0,
+      'require_entity' => 0,
+      'resizable' => 0,
+      'level_labels' => array(
+        'status' => 1,
+        'labels' => array(
+          0 => t('Select a category'),
+          1 => t('Select a sub-category'),
+          2 => t('Select a sub-category'),
+          3 => t('Select a sub-category'),
+          4 => t('Select a sub-category'),
+        ),
+      ),
+      'dropbox' => array(
+        'status' => 0,
+        'title' => t('All selections'),
+        'limit' => 0,
+        'reset_hs' => 1,
+      ),
+      'editability' => array(
+        'status' => 0,
+        'item_types' => array(),
+        'allowed_levels' => array(
+          0 => 0,
+          1 => 0,
+          2 => 1,
+        ),
+        'allow_new_levels' => 0,
+        'max_levels' => 3,
+      ),
+      'special_items' => array(
+        'any' => array('none', 'exclusive'),
+      ),
+      // These settings cannot be configured through the UI: they can only be
+      // overridden through code.
+      'animation_delay' => 400,
+      'special_items' => array(),
+      'render_flat_select' => 1,
+    )
+  );
+
+  $active = findit_association_store_status_count(1);
+  $inactive = findit_association_store_status_count(0);
+
+  $form['filters']['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Search'),
+  );
+  $form['filters']['active_store'] = array(
+    "#type" => 'markup',
+    "#markup" => t('<span class="actNum">Active</span> !count', array('!count' => l($active, 'user/' . $user->uid . '/astores', array('query' => array('status' => 1))))),
+  );
+
+  $form['filters']['deactivate_store'] = array(
+    "#type" => 'markup',
+    "#markup" => t('<span class="actNum">Deactive</span>  !count', array('!count' => l($inactive, 'user/' . $user->uid . '/astores', array('query' => array('status' => 0))))),
+  );
+
+  return $form;
+}
+
+/**
+ * 
+ * @global type $user
+ * @param type $form
+ * @param type $form_state
+ */
+function findit_store_search_submit($form, &$form_state) {
+  global $user;
+  $querystring = array();
+
+  if (isset($form_state['values']['title']) && $form_state['values']['title'] != '') {
+    $querystring['title'] = trim($form_state['values']['title']);
+  }
+
+  if (isset($form_state['values']['store_id']) && $form_state['values']['store_id'] != '') {
+    $querystring['store_id'] = trim($form_state['values']['store_id']);
+  }
+
+  if (isset($form_state['values']['name']) && $form_state['values']['name'] != '') {
+    $querystring['name'] = trim($form_state['values']['name']);
+  }
+
+  if (isset($form_state['values']['email']) && $form_state['values']['email'] != '') {
+    $querystring['email'] = trim($form_state['values']['email']);
+  }
+
+  if (isset($form_state['values']['mobile']) && $form_state['values']['mobile'] != '') {
+    $querystring['mobile'] = trim($form_state['values']['mobile']);
+  }
+
+  if (isset($form_state['values']['sku']) && $form_state['values']['sku'] != '') {
+    $querystring['sku'] = trim($form_state['values']['sku']);
+  }
+
+  if (isset($form_state['values']['category'][0]) && $form_state['values']['category'][0] != '') {
+    $querystring['category'] = trim($form_state['values']['category'][0]);
+  }
+
+  if (isset($form_state['values']['status']) && $form_state['values']['status'] != '') {
+    $querystring['status'] = $form_state['values']['status'];
+  }
+  $form_state['redirect'] = array('user/' . $user->uid . '/astores', array('query' => $querystring));
+}
+
+/**
+ * 
+ * @global type $user
+ * @param type $form
+ * @param type $form_state
+ * @return string
+ */
+function findit_admin_store_list_form($form, &$form_state) {
+  global $user;
+  if ((isset($form_state['input']['table']) && count($form_state['input']['table']) > 0) || isset($form_state['input']['confirm_first_time'])) {
+    $confirmFirstTime = isset($form_state['input']['confirm_first_time']) ? 0 : 1;
+    return findit_admin_store_list_form_confirm($form_state, $confirmFirstTime);
+  }
+  //Define table header
+  $header = array();
+  $header['title'] = array('data' => t('Title'), 'field' => 'cs.title');
+  $header['unique_store_id'] = array('data' => t('Store ID'));
+  $header['name'] = array('data' => t('Merchant Name'));
+  $header['mail'] = array('data' => t('Merchant Email'));
+  $header['mobile'] = array('data' => t('Merchant Mobile'));
+  $header['status'] = array('data' => t('Status'), 'field' => 'cs.status', 'class' => array('act-inactHeading'));
+  $header['opr'] = t('Operations');
+
+  //Create Query
+  $query = db_select('commerce_store', 'cs')->extend('TableSort')->extend('PagerDefault');
+  $query->leftjoin('users', 'u', 'u.uid = cs.uid');
+  $query->leftjoin('field_data_field_mobile_number', 'fdfmn', 'fdfmn.entity_id = cs.store_id');
+  $query->fields('u', array('name', 'mail'));
+  $query->fields('fdfmn', array('field_mobile_number_value'));
+  $query->fields('cs', array('store_id', 'title', 'status', 'unique_store_id'));
+
+  //conditions
+  if (isset($_GET['title']) && $_GET['title'] != '') {
+    $query->condition('cs.title', '%' . $_GET['title'] . '%', 'like');
+  }
+
+  if (isset($_GET['name']) && $_GET['name'] != '') {
+    $query->condition('u.name', '%' . $_GET['name'] . '%', 'like');
+  }
+
+  if (isset($_GET['email']) && $_GET['email'] != '') {
+    $query->condition('u.mail', $_GET['email']);
+  }
+
+  if (isset($_GET['mobile']) && $_GET['mobile'] != '') {
+    $query->condition('fdfmn.field_mobile_number_value', $_GET['mobile']);
+  }
+
+  if (isset($_GET['store_id']) && $_GET['store_id'] != '') {
+    $query->condition('cs.unique_store_id', $_GET['store_id']);
+  }
+
+  if (isset($_GET['sku']) && $_GET['sku'] != '') {
+    $tmp = getAssociativeMerchant('sku', $_GET['sku']);
+    if ($tmp) {
+      $query->condition('cs.unique_store_id', $tmp, 'IN');
+    }
+    else {
+      $query->condition('cs.unique_store_id', 'no');
+    }
+  }
+
+  if (isset($_GET['category']) && $_GET['category'] != '') {
+    $tmp = getAssociativeMerchant('category', $_GET['category']);
+    if ($tmp) {
+      $query->condition('cs.unique_store_id', $tmp, 'IN');
+    }
+    else {
+      $query->condition('cs.unique_store_id', 'no');
+    }
+  }
+
+  if (isset($_GET['status']) && $_GET['status'] != '') {
+    $query->condition('cs.status', $_GET['status']);
+  }
+  if (empty($_GET['sort']) && empty($_GET['order'])) {
+    $query->orderBy('cs.store_id', 'desc');
+  }
+
+  $query->orderByHeader($header);
+  $stores = $query->execute()->fetchAll();
+
+  $rows = array();
+  $rows['#tree'] = TRUE;
+  $true = theme('image', array('path' => drupal_get_path('module', 'findit_association') . '/webroot/images/true.png')) . '&nbsp;Active';
+  $false = theme('image', array('path' => drupal_get_path('module', 'findit_association') . '/webroot/images/false.png')) . '&nbsp;Deactive';
+
+  foreach ($stores as $key => $val) {
+
+    //$opr = l('Edit', 'store/' . $val->store_id . '/edit', array('query' => array('destination' => current_path()))) . '&nbsp;|&nbsp;';
+    $opr = l('View Products', 'astore/' . $val->store_id . '/associations') . '&nbsp;|&nbsp;';
+    $opr .= l(t('Store Detail'), 'astore/' . $val->store_id . '/details') . '&nbsp;|&nbsp;';
+    $opr .= l(t("View Orders"), '/merchant-store/' . $val->unique_store_id) . '&nbsp;|&nbsp;';
+    if ($val->status) {
+      $opr .= l('Deactivate Store', 'javascript:void(0)', array('external' => TRUE, 'attributes' => array('class' => 'deactive_store', 'store_id' => $val->store_id)));
+    }
+    else {
+      $opr .= l('Activate Store', 'javascript:void(0)', array('external' => TRUE, 'attributes' => array('class' => 'active_store', 'store_id' => $val->store_id)));
+    }
+
+    $rows[$val->store_id] = array('title' => l($val->title, 'astore/' . $val->store_id . '/details', array('attributes' => array('target' => '_blank'))),
+      'unique_store_id' => $val->unique_store_id,
+      'name' => $val->name,
+      'mail' => $val->mail,
+      'mobile' => $val->field_mobile_number_value,
+      'status' => $val->status ? $true : $false,
+      'opr' => $opr);
+  }
+
+  $form['action-button'] = array(
+    '#type' => 'fieldset',
+    '#title' => 'Operations'
+  );
+
+  $form['action-button']['operation'] = array(
+    '#type' => 'select',
+    '#options' => array(
+      'enable' => t('Activate store'),
+      'disable' => t('Deactivate store'
+      )
+    ),
+    '#required' => true
+  );
+  $form['action-button']['submit'] = array(
+    '#type' => 'submit',
+    '#value' => 'Submit',
+  );
+
+  $form['table'] = array(
+    '#type' => 'tableselect',
+    '#header' => $header,
+    '#options' => $rows,
+    '#default_value' => 0,
+    '#attributes' => array(
+      'class' => array('tableheader-processed'),
+    ),
+    '#empty' => 'No matching results are found.'
+  );
+
+  $form['back'] = array(
+    '#type' => 'hidden',
+    '#default_value' => current_path(),
+  );
+
+  $form['pager']['#markup'] = theme('pager', array('tags' => array()));
+  return $form;
+}
+
+/**
+ * 
+ * @param type $type
+ * @param type $value
+ * @return type
+ */
+function getAssociativeMerchant($type, $value) {
+  $stores = array();
+  switch ($type) {
+    case 'sku':
+      $query = db_select('eck_association', 'ea');
+      $query->fields('ea', array('unique_store_id'));
+      $query->condition('ea.sku', $value);
+      $resultSet = $query->execute()->fetchAll();
+
+      foreach ($resultSet as $key => $val) {
+        $stores[$val->unique_store_id] = $val->unique_store_id;
+      }
+      break;
+    case 'category' :
+
+      $term = taxonomy_term_load($value);
+      $term_childrens = array_merge(array($term->tid), array_keys(taxonomy_get_children_all($term->tid, $term->vid)));
+
+      $query = db_select('eck_association', 'ea');
+      $query->fields('ea', array('unique_store_id'));
+      $query->condition('ea.tid', $term_childrens, 'IN');
+      $resultSet = $query->execute()->fetchAll();
+
+      foreach ($resultSet as $key => $val) {
+        $stores[$val->unique_store_id] = $val->unique_store_id;
+      }
+      break;
+  }
+  return count($stores) > 0 ? $stores : false;
+}
+
+/**
+ * 
+ * @param type $form_state
+ * @return type
+ */
+function findit_admin_store_list_form_confirm(&$form_state, $confirmFirstTime) {
+  global $user;
+  $form['note'] = array(
+    '#type' => 'textarea',
+    '#title' => 'Message',
+    '#cols' => 60,
+    '#resizable' => TRUE,
+    '#required' => empty($confirmFirstTime) ? TRUE : FALSE,
+    '#rows' => 4
+  );
+
+  // Make sure the form redirects in the end
+  $store_ids = array();
+  if (isset($form_state['input']['store_ids'])) {
+    $store_ids = explode(',', $form_state['input']['store_ids']);
+  } else {
+    foreach ($form_state['input']['table'] as $key => $val) {
+      if ($val != '') {
+        $store_ids[] = $key;
+      }
+    }
+  }
+
+  $tmp_message = '';
+  switch ($form_state['input']['operation']) {
+    case 'enable' :
+      $tmp_message = 'Reason for Enabling Merchant Store';
+      break;
+    case 'disable' :
+      $tmp_message = 'Reason for Disabling Merchant Store';
+      break;
+  }
+  $form['confirm_first_time'] = array('#type' => 'hidden', '#value' => $confirmFirstTime);
+  $form['store_ids'] = array('#type' => 'hidden', '#value' => implode(',', $store_ids));
+  $form['operation'] = array('#type' => 'hidden', '#value' => $form_state['input']['operation']);
+  if (!empty($form_state['input']['back'])) {
+    $back = $form_state['input']['back'];
+  }
+  else {
+    $back = 'user/' . $user->uid . '/astores';
+  }
+  return confirm_form($form, 'Are you sure?', $back, $tmp_message, 'Continue', 'Cancel');
+}
+
+function findit_admin_store_list_form_validate($form, &$form_state) {
+  if (empty($form_state['values']['operation'])) {
+    form_set_error($form_state['values']['operation']);
+    drupal_set_message(t('Please select actve or deactve operation'), 'error');
+  } elseif (isset($form_state['values']['confirm_first_time']) && !empty($form_state['values']['confirm_first_time'])) {
+    form_set_error($form_state['values']['note']);
+  }
+}
+
+/**
+ * 
+ * @param type $form
+ * @param type $form_state
+ */
+function findit_admin_store_list_form_submit($form, &$form_state) {
+  if (isset($form_state['input']['store_ids']) && $form_state['input']['store_ids'] != '') {
+    $opr = $form_state['input']['operation'] == 'disable' ? 0 : 1;
+    $oprMsg = $form_state['input']['operation'] == 'disable' ? 'Deactivated' : 'Activated';
+    
+    $store_ids = explode(',', $form_state['input']['store_ids']);
+    //get unique store id of stores
+    $query = db_select('commerce_store', 'cs');
+    $query->fields('cs', array('store_id', 'unique_store_id', 'uid', 'title'));
+    $query->fields('u', array('mail', 'name'));
+    $query->leftJoin('users', 'u', 'u.uid = cs.uid');
+    $query->condition('store_id', $store_ids, 'IN');
+    $stores_data = $query->execute()->fetchAll();
+
+    foreach ($stores_data as $key => $val) {
+      $msg = '';
+      if ($opr) {
+        $msg = 'Enabled Store by Admin';
+      }
+      else {
+        $msg = 'Blocked Store by Admin';
+      }
+
+      //Perform opr on all store SKU's
+      $tmp = db_query('update eck_association set statusbyadmin = :opr, sync_stage = 1, notebyadmin = :msg, changed = :changed where unique_store_id = :usi ', array(':opr' => $opr, ':msg' => $msg, ':changed' => time(), ':usi' => $val->unique_store_id));
+      if ($tmp) {
+        //call association script for update all association on market place
+        $response = drupal_http_request(ASSO_UPDATE_URL);
+      }
+    }
+    //Disable all select stores
+    $stores = entity_load('commerce_store', $store_ids);
+    foreach ($stores as $store_id => $store) {
+      $store->log = $form_state['values']['note'];
+      $store_wrapper = entity_metadata_wrapper('commerce_store', $store);
+      $store_wrapper->status = $opr; //check status while association elastic script run
+      $store_wrapper->save();
+      drupal_set_message(t('@store @msg successfully', array('@store' => $store->title, '@msg' => $oprMsg)));
+    }
+
+    $confirm_message = false;
+    if (isset($form_state['input']['note']) && $form_state['input']['note'] != '') {
+      $confirm_message = isset($form_state['input']['values']) ? $form_state['input']['values'] : '';
+    }
+
+    //Send mail to merchant to inform your SKUs is disabled by findit admin
+    findit_association_sendmail('fdstmer', $stores_data, $opr, $confirm_message);
+  }
+  else {
+    drupal_set_message(t('Please select atleast one Store'), 'error');
+  }
+}
+
+
+
+/**
+ * 
+ * @param type $store
+ * @return type
+ */
+function findit_admin_store_association_list($store) {
+  $output = '';
+
+  // Search form will not open if message form will open on active/deactive skus.
+  if ((!isset($_REQUEST['table']) && !isset($_REQUEST['confirm_first_time'])) || empty($_REQUEST['operation'])) {
+    $adminAssoSearch = drupal_get_form('findit_user_association_search', $store);
+    $output .= drupal_render($adminAssoSearch);
+  }
+  $adminAssoList = drupal_get_form('findit_admin_store_association_list_form', $store);
+  $output .= drupal_render($adminAssoList);
+  return $output;
+}
+
+function findit_user_association_search($form, &$form_state, $store) {
+  global $user;
+
+  $form['title'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Title'),
+    '#default_value' => isset($_GET['title']) ? $_GET['title'] : '',
+    '#size' => 20,
+    '#description' => t('Search by product title.'),
+  );
+
+  $form['sku'] = array(
+    '#type' => 'textfield',
+    '#title' => t('SKU'),
+    '#default_value' => isset($_GET['sku']) ? $_GET['sku'] : '',
+    '#size' => 20,
+    '#description' => t('Search by product sku.'),
+  );
+
+  $category = variable_get('findit_product_association_vocabulary', 'product_category');
+
+  if (!isset($category)) {
+    if (user_access('administer product association')) {
+      drupal_set_message(t('Default product association category is not set, set it !here.', array('!here' => l(t('here'), 'admin/commerce/config/product-association', array('query' => array('destination' => current_path()))))), 'warning');
+    }
+    $form['description']['#markup'] = '<p>' . t('No categories are available to associate.') . '</p>';
+    return $form;
+  }
+
+  $vid = db_query('SELECT vid FROM {taxonomy_vocabulary} WHERE machine_name = :machine_name', array(':machine_name' => $category))->fetchField();
+
+  $form['category'] = array(
+    '#type' => 'hierarchical_select',
+    '#title' => t('Select Category'),
+    '#size' => 1,
+    '#default_value' => isset($_GET['category']) ? $_GET['category'] : '',
+    '#config' => array(
+      'module' => 'hs_taxonomy',
+      'params' => array(
+        'vid' => $vid,
+      ),
+      'save_lineage' => 0,
+      'enforce_deepest' => 0,
+      'entity_count' => 0,
+      'require_entity' => 0,
+      'resizable' => 0,
+      'level_labels' => array(
+        'status' => 0,
+        'labels' => array(
+          0 => t('Main category'),
+          1 => t('Subcategory'),
+          2 => t('Third level category'),
+        ),
+      ),
+      'dropbox' => array(
+        'status' => 0,
+        'title' => t('All selections'),
+        'limit' => 0,
+        'reset_hs' => 1,
+      ),
+      'editability' => array(
+        'status' => 0,
+        'item_types' => array(),
+        'allowed_levels' => array(
+          0 => 0,
+          1 => 0,
+          2 => 1,
+        ),
+        'allow_new_levels' => 0,
+        'max_levels' => 3,
+      ),
+      // These settings cannot be configured through the UI: they can only be
+      // overridden through code.
+      'animation_delay' => 400,
+      'special_items' => array(),
+      'render_flat_select' => 0,
+    )
+  );
+
+  $form['current_path'] = array(
+    '#type' => 'hidden',
+    '#value' => current_path(),
+  );
+
+  $form['actions'] = array(
+    '#type' => 'actions',
+  );
+  $form['actions']['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Search'),
+  );
+
+  $storeUrl = '/astore/' . $store->store_id . '/associations';
+  $form['actions']['reset'] = array(
+    '#type' => 'markup',
+    '#markup' => l(t('Reset'), $storeUrl, array('attributes' => array('class' => 'button btn btn-primary radius', 'id' => 'reset_button'))) . "<br></br>",
+  );
+
+  $backUrl = !empty($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : 'user/' . $user->uid . '/astores';
+  $form['actions']['back'] = array(
+    '#type' => 'markup',
+    '#markup' => l(t('Back'), $backUrl, array('attributes' => array('class' => 'button btn btn-primary radius', 'id' => 'processcart_but'))) . "<br></br>",
+  );
+
+  return $form;
+}
+
+function findit_user_association_search_submit($form, &$form_state) {
+
+  $values = $form_state['values'];
+  $data = array();
+  if ($values['title'] != '')
+    $data['title'] = trim($values['title']);
+  if ($values['sku'] != '')
+    $data['sku'] = trim($values['sku']);
+  if ($values['category'][0] != '')
+    $data['category'] = $values['category'][0];
+  if ($values['mode'] != '')
+    $data['mode'] = trim($values['mode']);
+
+  $data = array_filter($data);
+  $form_state['redirect'] = array($values['current_path'], array('query' => $data));
+}
+
+function findit_admin_store_association_list_form($form, &$form_state, $store) {
+  global $user;
+
+  // Call message form on sku selection.
+  if (((isset($form_state['input']['table']) && count($form_state['input']['table']) > 0) || isset($form_state['input']['confirm_first_time'])) && !empty($form_state['input']['operation'])) {
+
+    $confirmFirstTime = isset($form_state['input']['confirm_first_time']) ? 0 : 1;
+    return findit_admin_store_association_list_form_confirm($form_state, $confirmFirstTime);
+  }
+
+  $backUrl = 'astore/' . $store->store_id . '/associations';
+
+  $store_id = isset($store->store_id) ? $store->store_id : false;
+
+  if ($store_id) {
+
+    $header = association_header();
+
+    $associations = array();
+    $innerQuery = db_select('eck_association', 'ea');
+    $innerQuery->fields('ea');
+    $innerQuery->condition('ea.store', $store->store_id);
+    $innerQuery->execute();
+
+    $query = db_select('commerce_product', 'cp')->extend('TableSort')->extend('PagerDefault');
+    $query->addJoin('LEFT OUTER', $innerQuery, 'ea', 'ea.product = cp.product_id');
+    $query->leftjoin('commerce_product_type', 'cpt', 'cpt.type = cp.type');
+    $query->leftjoin('field_data_commerce_price', 'fdcp', 'fdcp.entity_id = cp.product_id');
+    $query->leftjoin('field_data_catalog_findit', 'fdcf', 'fdcf.entity_id = cp.product_id');
+    $query->leftjoin('taxonomy_term_data', 'ttd', 'ttd.tid = fdcf.catalog_findit_tid');
+    $query->leftjoin('commerce_store', 'cs', 'cs.unique_store_id = ea.unique_store_id');
+    $query->fields('cp', array('product_id', 'title', 'sku'));
+    $query->fields('cs', array('title', 'unique_store_id'));
+    $query->fields('cpt', array('name'));
+    $query->fields('ttd', array('tid', 'name'));
+    $query->fields('fdcp', array('commerce_price_amount', 'commerce_price_currency_code'));
+    $query->fields('ea');
+
+    //conditions
+    if (isset($_GET['title']) && $_GET['title'] != '') {
+      $query->condition('cp.title', '%' . $_GET['title'] . '%', 'like');
+    }
+
+    if (isset($_GET['sku']) && $_GET['sku'] != '') {
+      $query->condition('cp.sku', trim($_GET['sku']));
+    }
+
+    if (isset($_GET['category']) && $_GET['category'] != '') {
+      $term = taxonomy_term_load($_GET['category']);
+      $term_childrens = array_merge(array($term->tid), array_keys(taxonomy_get_children_all($term->tid, $term->vid)));
+      $query->condition('ttd.tid', $term_childrens, 'IN');
+    }
+
+    if (empty($_GET['sort']) && empty($_GET['order'])) {
+      $query->orderBy('ea.id', 'desc');
+    }
+    $query->orderByHeader($header);
+    $query->isNotNull('ea.id');
+
+    $query->limit(10);
+    $associations = $query->execute();
+
+    if (count($associations) > 0) {
+
+      $rows = array();
+      $true = theme('image', array('path' => drupal_get_path('module', 'findit_association') . '/webroot/images/true.png'));
+      $false = theme('image', array('path' => drupal_get_path('module', 'findit_association') . '/webroot/images/false.png'));
+
+      foreach ($associations as $key => $val) {
+
+       /* $sku_detail_link = '';
+        if (isset($val->id) && $val->id > 0) {
+          $sku_detail_link = sprintf(SKU_DETAIL_URL, $val->product_id, $val->sku);
+        }
+        else {
+          $sku_detail_link = 'product/' . $val->sku;
+        } */
+        $sku_detail_link = 'product/' . $val->sku;
+
+        $rows[$val->id]['title'] = l($val->title, $sku_detail_link, array('attributes' => array('target' => '_blank')));
+
+        $rows[$val->id]['sku'] = $val->sku;
+        $rows[$val->id]['name'] = $val->name;
+        $rows[$val->id]['ttd_name'] = $val->ttd_name;
+        $rows[$val->id]['commerce_price_currency_code'] = $val->commerce_price_currency_code;
+        $rows[$val->id]['commerce_price_amount'] = number_format($val->commerce_price_amount / 100, 2, '.', '');
+
+        $rows[$val->id]['price'] = number_format($val->price, 2, '.', '');
+
+        $rows[$val->id]['stock'] = $val->stock;
+        $rows[$val->id]['statusbyadmin'] = $val->statusbyadmin ? $true : $false;
+        $rows[$val->id]['status'] = $val->status ? $true : $false;
+        $rows[$val->id]['returnable'] = $val->returnable ? $true : $false;
+        $rows[$val->id]['gift_wrap'] = $val->gift_wrap ? $true : $false;
+
+        $tmp_note = explode('||', $val->note);
+        $tmp_note_str = '<ul>';
+        foreach ($tmp_note as $k => $v) {
+          $tmp_note_str .= sprintf('<li>%s</li>', $v);
+        }
+        $tmp_note_str .= '</ul>';
+
+        $rows[$val->id]['note'] = $tmp_note_str;
+        $rows[$val->id]['notebyadmin'] = $val->notebyadmin;
+
+        $opr = '';
+        if ($val->statusbyadmin) {
+          $opr .= l('Deactivate SKU', 'javascript:void(0)', array('external' => TRUE, 'attributes' => array('class' => 'deactive_sku', 'association_id' => $val->id)));
+        }
+        else {
+          $opr .= l('Activate SKU', 'javascript:void(0)', array('external' => TRUE, 'attributes' => array('class' => 'active_sku', 'association_id' => $val->id)));
+        }
+
+        $rows[$val->id]['opr'] = $opr;
+      }
+      
+      $form['action-button'] = array(
+        '#type' => 'fieldset',
+        '#title' => 'Operations'
+      );
+
+      $form['action-button']['operation'] = array(
+        '#type' => 'select',
+        '#options' => array(
+          'enable' => t('Activate SKU'),
+          'disable' => t('Deactivate SKU'
+          )
+        ),
+        '#required' => true
+      );
+
+      $form['submit'] = array('#type' => 'submit', '#value' => 'Submit');
+
+      $form['table'] = array(
+        '#type' => 'tableselect',
+        '#header' => $header,
+        '#options' => $rows,
+        '#default_value' => array(),
+        '#attributes' => array(
+          'class' => array(
+            'tableheader-processed'),
+        ),
+      );
+
+      $form['back'] = array('#type' => 'hidden', '#default_value' => $backUrl);
+      $form['pager']['#markup'] = theme('pager', array('tags' => array()));
+    }
+    else {
+      $form['description'] = array('#type' => 'markup', '#markup' => '<h3>' . t('No Association found !!!') . '</h3>');
+    }
+  }
+  else {
+    $form['description'] = array('#type' => 'markup', '#markup' => '<h3>' . t('Store not found !!!') . '</h3>');
+  }
+  return $form;
+}
+
+/**
+ * Callback function to get confirm message form.
+ * @param type $form_state
+ * @param type $confirmFirstTime
+ * @return type
+ */
+function findit_admin_store_association_list_form_confirm(&$form_state, $confirmFirstTime = FALSE) {
+  $sku_ids = array();
+  $form['note'] = array(
+    '#type' => 'textarea',
+    '#title' => t('Message'),
+    '#cols' => 60,
+    '#resizable' => TRUE,
+    '#required' => empty($confirmFirstTime) ? TRUE : FALSE,
+    '#rows' => 4
+  );
+
+  // Make sure the form redirects in the end
+  if (isset($form_state['input']['sku_ids'])) {
+    $sku_ids = explode(',', $form_state['input']['sku_ids']);
+  }
+  else {
+    foreach ($form_state['input']['table'] as $key => $val) {
+      if ($val != '') {
+        $sku_ids[] = $key;
+      }
+    }
+  }
+
+  $query = db_select('eck_association', 'ea');
+  $query->fields('ea', array('sku', 'id'));
+  $query->fields('cs', array('store_id', 'unique_store_id', 'uid', 'title'));
+  $query->fields('u', array('mail', 'name'));
+  $query->fields('cp', array('title'));
+  $query->leftJoin('users', 'u', 'u.uid = ea.uid');
+  $query->leftJoin('commerce_product', 'cp', 'cp.sku = ea.sku');
+  $query->leftJoin('commerce_store', 'cs', 'ea.unique_store_id = cs.unique_store_id');
+  $query->condition('ea.id', $sku_ids, 'IN');
+  $data = $query->execute()->fetchAll();
+
+  $opr = $form_state['input']['operation'] == 'enable' ? 'Activate' : 'Deactivate';
+  $message = $opr . ' below SKUs';
+
+  $tmp = reset($data);
+  $message .= sprintf(' in %s store', $tmp->title);
+
+  $counter = 1;
+  foreach ($data as $key => $val) {
+    $message .= sprintf('<br/>%d. %s: %s', $counter++, $val->sku, $val->cp_title);
+  }
+  $backUrl = isset($form_state['input']['back']) ? $form_state['input']['back'] : '';
+  $form['confirm_first_time'] = array('#type' => 'hidden', '#value' => $confirmFirstTime);
+  $form['sku_ids'] = array('#type' => 'hidden', '#value' => implode(',', $sku_ids));
+  $form['operation'] = array('#type' => 'hidden', '#value' => $form_state['input']['operation']);
+  return confirm_form($form, $message, $backUrl, 'Additional note', 'Continue', 'Cancel');
+}
+
+/**
+ * Validate function of admin asso listing form.
+ * @param type $form_state
+ * @param type $confirmFirstTime
+ * @return type
+ */
+function findit_admin_store_association_list_form_validate($form, &$form_state) {
+  if (empty($form_state['values']['operation'])) {
+    form_set_error($form_state['values']['operation']);
+    drupal_set_message(t('Please select actve or deactve operation'), 'error');
+  }
+  elseif (isset($form_state['values']['confirm_first_time']) && !empty($form_state['values']['confirm_first_time'])) {
+    form_set_error($form_state['values']['note']);
+  }
+}
+
+function findit_admin_store_association_list_form_submit($form, &$form_state) {
+  if (isset($form_state['input']['sku_ids']) && $form_state['input']['sku_ids'] != '') {
+    $opr = $form_state['input']['operation'] == 'disable' ? 0 : 1;
+    $oprMsg = $form_state['input']['operation'] == 'disable' ? 'Deactivated' : 'Activated';
+    $sku_ids = explode(',', $form_state['input']['sku_ids']);
+    $associations = entity_load('association', $sku_ids);
+    foreach ($associations as $association_id => $association) {
+      $association_wrapper = entity_metadata_wrapper('association', $association);
+      $association_wrapper->sync_stage = 1; //check status while association elastic script run
+      $association_wrapper->statusbyadmin = $opr;
+      $association_wrapper->notebyadmin = $form_state['input']['note'];
+      $association_wrapper->changed = time();
+      $association_wrapper->save();
+      $sku = isset($association_wrapper->sku) ? $association_wrapper->sku->value() : '';
+      drupal_set_message(t('@sku @msg successfully', array('@sku' => $sku, '@msg' => $oprMsg)));
+    }
+
+    $query = db_select('eck_association', 'ea');
+    $query->fields('ea', array('sku', 'id'));
+    $query->fields('cs', array('store_id', 'unique_store_id', 'uid', 'title'));
+    $query->fields('u', array('mail', 'name'));
+    $query->leftJoin('users', 'u', 'u.uid = ea.uid');
+    $query->leftJoin('commerce_store', 'cs', 'ea.unique_store_id = cs.unique_store_id');
+    $query->condition('ea.id', $sku_ids, 'IN');
+    $data = $query->execute()->fetchAll();
+
+    //Get confirmation and send to the mail
+    $confirm_message = false;
+    if (isset($form_state['input']['note']) && $form_state['input']['note'] != '') {
+      $confirm_message = $form_state['input']['note'];
+    }
+    //Send mail to merchant to inform your SKUs is disabled by findit admin
+    findit_association_sendmail('fdskumer', $data, $opr, $confirm_message);
+
+    //call association script for update all association on market place
+    $response = drupal_http_request(ASSO_UPDATE_URL);
+  }
+  else {
+    drupal_set_message(t('Please select atleast one SKU'), 'error');
+  }
+}
+
+/* * *
+ * Send email to all merchant when store is deactive and active
+ * Type : mail type
+ * 1. findit user send deactive and active store information to merchant (fdstmer)
+ * 2. findit user send deactive and active SKU information to merchant (fdskumer)
+ */
+
+function findit_association_sendmail($type, $data, $opr, $confirm_message = false) {
+  global $user;
+
+  $params = array();
+  $from = variable_get('site_mail', ini_get('sendmail_from'));
+  $params['pet_from'] = $from;
+  $params['pet_bcc'] = 'biswajeet.mondal@srijan.in';
+
+  switch ($type) {
+    case 'fdstmer' : //findit user enable/disable store information send to merchant
+      switch ($opr) {
+        case 0 :
+          $pet = pet_load('deactive_merchant_store_by_findit_user');
+          if (isset($pet->pid)) {
+            $stores = array();
+            //Send mail to all merchant whose store is disabled
+            foreach ($data as $key => $val) {
+              $stores[] = $val->title;
+              if ($val->mail != '') {
+
+                $tmp_data = array();
+                $tmp_data['merchant_name'] = $val->name;
+                $tmp_data['store_name'] = $val->title;
+
+                if ($confirm_message) {
+                  $tmp_data['confirm_message'] = $confirm_message;
+                }
+
+                $params['pet_to'] = $val->mail;
+                $params['pet_data'] = $tmp_data;
+                pet_send_one_mail($pet, $params);
+              }
+              else {
+                $msg = sprintf('Mail id not configured for store Id : %s ', $val->unique_store_id);
+                drupal_set_message($msg, 'error');
+              }
+            }
+
+            //Send mail to findit user
+            $pet = pet_load('deactive_merchant_store_by_findit_user_mail_send_to_findit');
+            if (isset($pet->pid)) {
+
+              //get list of findit users
+              $findit_user = array();
+              $tmp_users = getUserListByRole('findit_user', array('mail'));
+              if ($tmp_users) {
+                foreach ($tmp_users as $key => $val) {
+                  $findit_user[] = $val['mail'];
+                }
+              }
+
+              $tmp_data = array();
+              $tmp_data['store_list'] = implode(',<br/>', $stores);
+
+              if ($confirm_message) {
+                $tmp_data['confirm_message'] = $confirm_message;
+              }
+
+              $params['pet_to'] = implode(',', $findit_user);
+              $params['pet_data'] = $tmp_data;
+              pet_send_one_mail($pet, $params);
+            }
+            else {
+              drupal_set_message(t('deactive_merchant_store_by_findit_user_mail_send_to_findit mail template not set'), 'error');
+            }
+          }
+          else {
+            drupal_set_message(t('deactive_merchant_store_by_findit_user mail template not set'), 'error');
+          }
+          break;
+        case 1 :
+
+          $pet = pet_load('active_merchant_store_by_findit_user');
+          if (isset($pet->pid)) {
+            foreach ($data as $key => $val) {
+              if ($val->mail != '') {
+                $params = array();
+                $params['pet_from'] = $from;
+                $params['pet_to'] = $val->mail;
+                $params['pet_data'] = $val;
+                pet_send_one_mail($pet, $params);
+              }
+              else {
+                $msg = sprintf('Mail id not configured for store Id : %s ', $val->unique_store_id);
+                drupal_set_message($msg, 'error');
+              }
+            }
+          }
+          else {
+            drupal_set_message(t('active_merchant_store_by_findit_user mail template not set'), 'error');
+          }
+
+          break;
+      }
+      break;
+    case 'fdskumer' : //findit user enable/disable sku information send to merchant
+      switch ($opr) {
+        case 0 :
+          $pet = pet_load('deactive_merchant_sku_by_findit_user');
+          if (isset($pet->pid)) {
+            if (count($data) > 0) {
+              $sku_list = '';
+              foreach ($data as $key => $val) {
+                $sku_list .= skuDetailForMail($val->sku);
+              }
+
+              $data = (Array) reset($data);
+              $data['store_name'] = $data['title'];
+              $date['merchant_name'] = $data['name'];
+              $data['sku_list'] = $sku_list;
+
+              if ($confirm_message) {
+                $data['confirm_message'] = $confirm_message;
+              }
+
+              if ($data['mail'] != '') {
+                $params['pet_to'] = $data['mail'];
+                $params['pet_data'] = $data;
+                pet_send_one_mail($pet, $params);
+              }
+              else {
+                $msg = sprintf('Mail id not configured for store Id : %s ', $data->unique_store_id);
+                drupal_set_message($msg, 'error');
+              }
+            }
+          }
+          else {
+            drupal_set_message(t('deactive_merchant_sku_by_findit_user mail template not set'), 'error');
+          }
+          break;
+        case 1 :
+
+          $pet = pet_load('active_merchant_sku_by_findit_user');
+          if (isset($pet->pid)) {
+            foreach ($data as $key => $val) {
+              if ($val->mail != '') {
+                $params = array();
+                $params['pet_from'] = $from;
+                $params['pet_to'] = $val->mail;
+                $params['pet_data'] = $val;
+                pet_send_one_mail($pet, $params);
+              }
+              else {
+                $msg = sprintf('Mail id not configured for store Id : %s ', $val->unique_store_id);
+                drupal_set_message($msg, 'error');
+              }
+            }
+          }
+          else {
+            drupal_set_message(t('active_merchant_sku_by_findit_user mail template not set'), 'error');
+          }
+
+          break;
+      }
+      break;
+    case 'merskuopr' : //merchant sku enable/disable information send to findit_user
+      switch ($opr) {
+        case 0 :
+          $pet = pet_load('deactive_sku_in_store_by_merchant_send_mail_to_findit');
+          if (isset($pet->pid)) {
+
+            //get list of findit users
+            $findit_user = array();
+            $tmp_users = getUserListByRole('findit_user', array('mail'));
+            if ($tmp_users) {
+              foreach ($tmp_users as $key => $val) {
+                $findit_user[] = $val['mail'];
+              }
+            }
+
+            $sku_list = '';
+            foreach ($data as $key => $val) {
+              $sku_list .= skuDetailForMail($val['sku']);
+              $sku_list .= sprintf('<br/>Reason: %s', $val['notebymerchant']);
+            }
+
+            $data = reset($data);
+            $tmp_data = array();
+            $tmp_data['store_name'] = $data['store_title'];
+            $tmp_data['sku_list'] = $sku_list;
+
+            $params['pet_to'] = implode(',', $findit_user);
+            $params['pet_data'] = $tmp_data;
+            pet_send_one_mail($pet, $params);
+          }
+          else {
+            drupal_set_message(t('deactive_sku_in_store_by_merchant_send_mail_to_findit mail template not set'), 'error');
+          }
+          break;
+        case 1 :
+          /*
+            $pet = pet_load('active_sku_in_store_by_merchant_send_mail_to_findit');
+            if(isset($pet->pid)){
+            $params = array();
+            $params['pet_from'] = $from;
+            $params['pet_to'] = $val->mail;
+            $params['pet_data'] = $val;
+            pet_send_one_mail($pet, $params);
+            }
+           */
+          break;
+      }
+      break;
+  }
+}
+
+/**
+ * Implements hook_token_info.
+ */
+function findit_association_token_info() {
+  $info['types']['association'] = array(
+    'name' => t('Association'),
+    'description' => t('Tokens related to Association.'),
+  );
+  $info['tokens']['association']['sku'] = array(
+    'name' => t('Association SKU'),
+    'description' => t('Association SKU name.'),
+  );
+  $info['tokens']['association']['sku_list'] = array(
+    'name' => t('Association sku list'),
+    'description' => t('Association SKU list.'),
+  );
+  $info['tokens']['association']['store_name'] = array(
+    'name' => t('Merchant Store Name'),
+    'description' => t('Merchant store name.'),
+  );
+  $info['tokens']['association']['store_list'] = array(
+    'name' => t('Merchant Store List'),
+    'description' => t('Merchant store list.'),
+  );
+  $info['tokens']['association']['merchant_name'] = array(
+    'name' => t('Merchant Name'),
+    'description' => t('Merchant name.'),
+  );
+  $info['tokens']['association']['confirm_message'] = array(
+    'name' => t('Association Confirm Message'),
+    'description' => t('Association Confirm Message.'),
+  );
+  $info['tokens']['association']['stock'] = array(
+    'name' => t('Product Stock'),
+    'description' => t('Product Stock.'),
+  );
+  $info['tokens']['association']['message'] = array(
+    'name' => t('message'),
+    'description' => t('message.'),
+  );
+  return $info;
+}
+
+/**
+ * Implements hook_tokens.
+ */
+function findit_association_tokens($type, $tokens, array $data = array(), array $options = array()) {
+  $replacements = array();
+  if ($type == 'association') {
+    foreach ($tokens as $name => $original) {
+      if ($name == 'merchant_name') {
+        $replacements [$original] = isset($data['global']->merchant_name) ? $data['global']->merchant_name : '';
+      }
+      elseif ($name == 'store_name') {
+        $replacements [$original] = isset($data['global']['store_name']) ? $data['global']['store_name'] : '';
+      }
+      elseif ($name == 'sku_list') {
+        $replacements [$original] = isset($data['global']['sku_list']) ? $data['global']['sku_list'] : '';
+      }
+      elseif ($name == 'store_list') {
+        $replacements [$original] = isset($data['global']['store_list']) ? $data['global']['store_list'] : '';
+      }
+      elseif ($name == 'confirm_message') {
+        $replacements [$original] = isset($data['global']['confirm_message']) ? $data['global']['confirm_message'] : '';
+      }
+      elseif ($name == 'stock') {
+        $replacements [$original] = isset($data['global']['stock']) ? $data['global']['stock'] : '';
+      }
+      elseif ($name == 'message') {
+        $replacements [$original] = isset($data['global']['message']) ? $data['global']['message'] : '';
+      }
+    }
+  }
+  return $replacements;
+}
+
+/**
+ * Implements hook_mail_alter().
+ */
+function findit_association_mail_alter(&$message) {
+  $message['headers']['Content-Type'] = 'text/html; charset=UTF-8;';
+}
+
+/* * *
+ * function for getting role information
+ */
+
+function isUser($role) {
+  global $user;
+  $return = false;
+  switch ($role) {
+    case 'findit_user' :
+    case 'findit_admin' :
+      $tmp = array(5, 6);
+      foreach ($user->roles as $key => $val) {
+        if (in_array($key, $tmp)) {
+          $return = true;
+          break;
+        }
+      }
+      break;
+    case 'admin' :
+      $tmp = array(3);
+      foreach ($user->roles as $key => $val) {
+        if (in_array($key, $tmp)) {
+          $return = true;
+          break;
+        }
+      }
+      break;
+    case 'merchant' :
+      $tmp = array(4);
+      foreach ($user->roles as $key => $val) {
+        if (in_array($key, $tmp)) {
+          $return = true;
+          break;
+        }
+      }
+      break;
+    case 'authenticated' :
+      $tmp = array(2);
+      foreach ($user->roles as $key => $val) {
+        if (in_array($key, $tmp)) {
+          $return = true;
+          break;
+        }
+      }
+      break;
+  }
+  return $return;
+}
+
+function getUserListByRole($role, $fields = array('*')) {
+  $users = array();
+  switch ($role) {
+    case 'findit_user' :
+      try {
+        $query = db_select('users', 'u');
+        $query->fields('u', $fields);
+        $query->leftjoin('users_roles', 'ur', 'ur.uid = u.uid');
+        $query->condition('ur.rid', array(4, 5), 'IN');
+        $result = $query->execute();
+
+        while ($row = $result->fetchAssoc()) {
+          $users[] = $row;
+        }
+      }
+      catch (Exception $e) {
+        drupal_set_message($e->getMessage(), 'error');
+        return false;
+      }
+      break;
+  }
+  return array(array('mail' => 'findituser@srijan.in'));
+  return $users;
+}
+
+function skuDetailForMail($sku) {
+  $product = commerce_product_load_by_sku($sku);
+  $product_wrapper = entity_metadata_wrapper('commerce_product', $product);
+  $attributes = array();
+
+  // get detail
+  $attributes['title'] = '';
+  $attributes['detail'] = '';
+  $attributes['image'] = '';
+  $attributes['sku'] = '';
+
+  if (empty($product)) {
+    return $attributes;
+  }
+
+  if (isset($product_wrapper->title)) {
+    $attributes['title'] = $product_wrapper->title->value();
+  }
+
+  if (isset($product_wrapper->akeneo_snapshot)) {
+    $attributes['detail'] = htmlentities($product_wrapper->akeneo_snapshot->value(), ENT_QUOTES, "UTF-8");
+  }
+  //SKU
+  if ($product_wrapper->sku !== NULL) {
+    $attributes['sku'] = $product_wrapper->sku->value();
+  }
+  //Image
+  if (isset($product_wrapper->akeneo_image_small)) {
+    $image = $product_wrapper->akeneo_image_small->value();
+    if ($image) {
+      $media_path = variable_get('image_media_path', 'http://pim-devfindit.s115.srijan-sites.com/media/');
+      $thumbnail_path = str_replace('$image_media', $media_path, $image);
+      $variables = array(
+        'path' => $thumbnail_path,
+        'width' => '50px',
+        'height' => '50px',
+      );
+      $attributes['image'] = theme('image', $variables);
+    }
+  }
+
+  $tmp = $attributes['sku'] != '' ? sprintf('<h2>SKU: %s</h2>', $attributes['sku']) : '';
+  $tmp .= $attributes['title'] != '' ? sprintf('<h5>%s</h5>', $attributes['title']) : '';
+  $tmp .= $attributes['detail'] != '' ? sprintf('<div class="detail">%s</div>', $attributes['detail']) : '';
+  $tmp .= $attributes['image'] != '' ? sprintf('<div class="img">%s</div>', $attributes['image']) : '';
+
+  return $tmp;
+}
+
+function association_header() {
+  return array(
+    'title' => array('data' => t('Title'), 'field' => 'cp.title'),
+    'sku' => array('data' => t('SKU'), 'field' => 'cp.sku',),
+    'name' => array('data' => t('Parent Category'), 'field' => 'cpt.name',),
+    'ttd_name' => array('data' => t('Category')),
+    'commerce_price_currency_code' => array('data' => t('Price Code')),
+    'commerce_price_amount' => array('data' => t('Default Price'), 'field' => 'fdcp.commerce_price_amount',),
+    'price' => array('data' => t('Price'), 'field' => 'ea.price',),
+    'stock' => array('data' => t('Stock'), 'field' => 'ea.stock',),
+    'statusbyadmin' => array('data' => t('Status By Admin'), 'field' => 'ea.statusbyadmin',),
+    'status' => array('data' => t('Status'), 'field' => 'ea.status',),
+    'returnable' => array('data' => t('Returnable'), 'field' => 'ea.returnable',),
+    'gift_wrap' => array('data' => t('Gift Wrap'), 'field' => 'ea.gift_wrap',),
+    'note' => array('data' => t('Note')),
+    'notebyadmin' => array('data' => t('Note by Admin')),
+    'opr' => array('data' => t('operation')),
+  );
+}
+
+function taxonomy_get_children_all($tid, $vid = 0, $key = 'tid') {
+  $c = taxonomy_get_children($tid, $vid, $key);
+  $result = array();
+  foreach ($c as $t => $d) {
+    $result[$t] = $d;
+    $below = taxonomy_get_children_all($t, $vid, $key);
+    if (!empty($below)) {
+      foreach ($below as $nt => $nd) {
+        $result[$nt] = $nd;
+      }
+    }
+  }
+  return $result;
+}
+
+/**
+ *
+ * @param type $store
+ */
+function findit_admin_store_detail($form, $form_state, $store) {
+  global $user;
+  // $form_state = array();
+  $block = module_invoke('findit_association', 'block_view', 'store_detail_block');
+  $block_data = render($block['content']);
+  $store_wrapper = entity_metadata_wrapper('commerce_store', $store);
+  $account = user_load($store_wrapper->uid->value());
+  $profile_wrapper = (object) array();
+  $profile = profile2_load_by_user($store_wrapper->uid->value(), 'merchant_profile');
+  if (isset($profile->uid)) {
+    $profile_wrapper = entity_metadata_wrapper('profile2', $profile);
+  }
+  //print_r($profile_wrapper->field_address->value()); die;
+  $disable_array = array('disabled' => true);
+  $show_submit = false;
+  $drop_down = true;
+  if (isset($_GET['destination'])) {
+    $disable_array = array();
+    $show_submit = TRUE;
+    $drop_down = false;
+  }
+
+  $backUrl = 'user/' . $user->uid . '/astores';
+  $form['back_url'] = array(
+    '#type' => 'markup',
+    '#markup' => "<div class='back-wrapper'><span class='back'>" . l(t('Back'), $backUrl) . "</span><span>" .  t('Back') . "</span></div>",
+  );
+  $form['#store'] = $store_wrapper;
+  $form['#profile'] = $profile_wrapper;
+  $form['top_block'] = array(
+    "#type" => 'markup',
+    "#markup" => $block_data,
+  );
+
+  $url = drupal_get_destination();
+  if (!$show_submit) {
+    $form['edit_link'] = array(
+      "#type" => 'markup',
+      "#markup" => l(t('Edit Details'), $url['destination'], array('query' => array('destination' => $url['destination']))),
+    );
+  }
+  $form['edit_profile_fieldset'] = array(
+    "#type" => 'fieldset',
+    '#title' => t('Profile Details'),
+    '#collapsible' => FALSE,
+    '#collapsed' => FALSE,
+  );
+  $form['edit_profile_fieldset']['seller_name'] = array(
+    "#type" => 'textfield',
+    "#default_value" => $store->title,
+    '#attributes' => $disable_array,
+  );
+  $form['edit_profile_fieldset']['seller_name'] = array(
+    "#type" => 'textfield',
+    '#title' => t('Seller Name'),
+    "#default_value" => $store->title,
+    '#attributes' => $disable_array,
+    '#required' => TRUE,
+  );
+  if (isset($profile->uid)) {
+    $form['edit_profile_fieldset']['seller_contact'] = array(
+      "#type" => 'textfield',
+      '#title' => t("Contact Name"),
+      '#required' => TRUE,
+      "#default_value" => $profile_wrapper->field_full_name->value(),
+      '#attributes' => $disable_array,
+    );
+  }
+  $form['edit_profile_fieldset']['mail'] = array(
+    "#type" => 'textfield',
+    '#title' => t("Email Id"),
+    //'#required' => TRUE,
+    "#default_value" => $account->mail,
+    '#attributes' => array('disabled' => TRUE),
+  );
+  $options = array(
+    'field_name' => 'field_address'
+  );
+  field_attach_form('commerce_store', $store, $form, $form_state, NULL, $options);
+  $form['field_address'][LANGUAGE_NONE][0]['#attributes'] = $disable_array;
+  $form['field_address'][LANGUAGE_NONE][0]['#title'] = t("Office Address");
+  if (isset($profile->uid)) {
+    $field = field_info_field('field_address');
+    $instance = field_info_instance('profile2', 'field_address', 'merchant_profile');
+    $profile_address_field = field_default_form('profile2', $profile, $field, $instance, LANGUAGE_NONE, array($profile_wrapper->field_address->value()), $form, $form_state);
+    $form['profile_address'] = $profile_address_field['field_address'];
+    $form['profile_address'][LANGUAGE_NONE][0]['#attributes'] = $disable_array;
+    $form['profile_address'][LANGUAGE_NONE][0]['#title'] = t("Registered Address");
+    $form['profile_address'][LANGUAGE_NONE][0]['#disabled'] = $drop_down;
+  }
+  $form['field_address'][LANGUAGE_NONE][0]['#disabled'] = $drop_down;
+  if ($show_submit) {
+    $form['submit'] = array(
+      "#type" => 'submit',
+      "#value" => t("Submit"),
+      "#weight" => 100,
+    );
+    $form['cancel'] = array(
+      "#type" => 'markup',
+      "#markup" => l(t('Cancel'), 'astore/' . $store->store_id . '/details', array('attributes' => array('class' => array('edit-store-cancel btn btn-primary')))),
+      "#weight" => 100,
+    );
+  }
+  return $form;
+}
+
+/**
+ * 
+ * @param type $form
+ * @param type $form_state
+ */
+function findit_admin_store_detail_submit($form, $form_state) {
+  $values = $form_state['values'];
+  if (strtolower($form_state['input']['op']) == "submit") {
+    $values = $form_state['values'];
+    $form['#store']->title = $values['seller_name'];
+    $form['#profile']->field_full_name = $values['seller_contact'];
+//    print_r($form); die;
+    $form['#store']->field_address = $values['field_address'][LANGUAGE_NONE]['0'];
+    $form['#profile']->field_address = $values['profile_address'][LANGUAGE_NONE]['0'];
+    //print_r($form['#profile']->value()); die;
+    if (($form['#profile']->field_full_name)) {
+      $form['#profile']->save();
+    }
+    $form['#store']->save();
+    drupal_set_message(t("Profile Updated Successfuly"));
+  }
+}
+
+/**
+ * Implements hook_block_info.
+ */
+function findit_association_block_info() {
+  $blocks['store_detail_block'] = array(
+    'info' => t('Store Detail block'),
+    'cache' => DRUPAL_NO_CACHE,
+  );
+  return $blocks;
+}
+
+/**
+ * Implements hook_block_view.
+ */
+function findit_association_block_view($delta = '') {
+  $block = array();
+  if ($delta == 'store_detail_block') {
+    $block['subject'] = '';
+    $block['content'] = findit_association_get_store_detail();
+  }
+  return $block;
+}
+
+/**
+ *
+ */
+function findit_association_get_store_detail() {
+  $store = commerce_store_load(arg(1));
+  if (isset($store->store_id)) {
+    $profile_wrapper = (object) array();
+    $store_wrapper = entity_metadata_wrapper('commerce_store', $store);
+    $user = user_load($store_wrapper->uid->value());
+    $profile = profile2_load_by_user($store_wrapper->uid->value(), 'merchant_profile');
+    if (isset($profile->uid)) {
+      $profile_wrapper = entity_metadata_wrapper('profile2', $profile);
+    }
+    $rating = findit_association_get_seller_rating($store_wrapper->unique_store_id->value());
+    return theme('findit_detail_block', array('store' => $store_wrapper, 'user' => $user, 'profile' => $profile_wrapper, 'rating' => $rating));
+  }
+}
+
+/**
+ * 
+ * @param type $form
+ * @param type $form_state
+ * @param type $store
+ * @param type $status
+ */
+function findit_accociation_update_status($form, $form_state, $store, $status) {
+  $form = array();
+  $stsMsg = ($status == 'activate') ? 'Activate' : 'Deactivate';
+  $form['#store'] = $store;
+  $form['status'] = array(
+    "#type" => 'value',
+    "#value" => $status,
+  );
+  $form['confirm_text'] = array(
+    "#type" => 'markup',
+    "#markup" => t("Are You Sure, you want to @msg this Store", array('@msg' => $stsMsg)),
+  );
+  $form['reason'] = array(
+    "#type" => 'textarea',
+    "#title" => t('Reason'),
+    "#required" => true,
+  );
+
+  $form['submit'] = array(
+    "#type" => 'submit',
+    "#value" => t('Confirm')
+  );
+  $url = drupal_get_destination();
+  $form['cancel'] = array(
+    "#type" => 'markup',
+    "#markup" => l(t('Cancel'), $url['destination'])
+  );
+  return $form;
+}
+
+/**
+ * 
+ * @param type $form
+ * @param type $form_state
+ */
+function findit_accociation_update_status_submit($form, $form_state) {
+  $values = $form_state['values'];
+  $opr = $values['status'] == 'deactivate' ? 0 : 1;
+  $opMsg = $values['status'] == 'deactivate' ? 'Deactivated' : 'Activated';
+  $query = db_select('commerce_store', 'cs');
+  $query->fields('cs', array('store_id', 'unique_store_id', 'uid', 'title'));
+  $query->fields('u', array('mail', 'name'));
+  $query->leftJoin('users', 'u', 'u.uid = cs.uid');
+  $query->condition('store_id', $form['#store']->store_id);
+  $stores_data = $query->execute()->fetchAll();
+  foreach ($stores_data as $key => $val) {
+    $msg = '';
+    if ($opr) {
+      $msg = 'Enabled Store by Admin';
+    }
+    else {
+      $msg = 'Blocked Store by Admin';
+    }
+
+    //Perform opr on all store SKU's
+    $tmp = db_query('update eck_association set statusbyadmin = :opr, sync_stage = 1, notebyadmin = :msg, changed = :changed where unique_store_id = :usi ', array(':opr' => $opr, ':msg' => $msg, ':changed' => time(), ':usi' => $val->unique_store_id));
+    if ($tmp) {
+      //call association script for update all association on market place
+      $response = drupal_http_request(ASSO_UPDATE_URL);
+    }
+  }
+  $form['#store']->log = $values['reason'];
+  //Disable all select stores
+  $store_wrapper = entity_metadata_wrapper('commerce_store', $form['#store']);
+  $store_wrapper->status = $opr; //check status while association elastic script run
+  $store_wrapper->save();
+  drupal_set_message(t('@store @msg successfully!', array('@store' => $store_wrapper->title->value(), '@msg' => $opMsg)));
+  $confirm_message = $values['reason'];
+
+  //Send mail to merchant to inform your SKUs is disabled by findit admin
+  findit_association_sendmail('fdstmer', $stores_data, $opr, $confirm_message);
+}
+
+/**
+ * 
+ * @param type $unique_store_id
+ * @return int
+ */
+function findit_association_get_seller_rating($unique_store_id) {
+  //print_r($unique_store_id); die;
+  //print_r(entity_load_single('commerce_store', 23)); die;
+  $url = variable_get('marketplace_url') . '/api_market/merchant-seller-rating-service/merchant/' . $unique_store_id;
+  //print_r($url); die;
+  $data = 'type&value=' . $unique_store_id; // Parameters to pass to URL
+  $options = array(
+    'method' => 'GET', // HTTP Request Type
+    'data' => $data, // Parameters
+    'headers' => array('Content-Type' => 'application/x-www-form-urlencoded'),
+  );
+
+  $result = drupal_http_request($url, $options);
+  //print_r($result); die;
+  $rating = drupal_json_decode($result->data);
+  if (isset($rating['rating']['avg'])) {
+    return $rating['rating']['avg'];
+  }
+  return 0;
+}
+
+/**
+ * 
+ * @param type $status
+ * @return type
+ */
+function findit_association_store_status_count($status) {
+  $result = db_select('commerce_store', 'cs')
+      ->fields('cs')
+      ->condition('status', $status)
+      ->execute();
+  $num_of_results = $result->rowCount();
+  return $num_of_results;
+}
+
+function findit_merchant_download_association_file($product_ids = array(), $filetype = 'csv', $op = 'list', $store_id = '', $type = '') {
+  global $user;
+  set_time_limit(0);
+
+  $association_batch = array();
+  $data = array();
+  $sort_order_string = 'id';
+  $sort_order = 'DESC';
+
+  if (empty($store_id)) {
+    $merchant_ids = findit_me_get_store_id_by_uid($user->uid);
+    $store_id = $merchant_ids[0]->store_id;
+  }
+
+  $fileHeader = array('SKU', 'ACTIVE (YES/NO)', 'STOCK LIMIT NOTIFICATION', 'CURRENT STOCK', 'SELLER PRICE', 'RETURN (YES/NO)', 'GIFTWRAP (YES/NO)', 'Genuine Products (YES/NO)', 'Free Shipping (YES/NO)', 'Replacement Warranty (YES/NO)');
+
+  // Get Header data.
+  $dataTxt = implode("\t", array_values($fileHeader)) . "\r\n";
+
+  // Get Sort field and its value.
+  $params = drupal_get_query_parameters();
+  if (isset($params['order']) && !empty($params['order'])) {
+    $sort_order_string = $params['order'];
+  }
+  if (isset($params['sort']) && !empty($params['sort'])) {
+    $sort_order = $params['sort'];
+  }
+  $sort_order_field = _findit_association_get_sort_field($sort_order_string);
+
+  $innerQuery = db_select('eck_association', 'ea');
+  $innerQuery->fields('ea');
+  $innerQuery->condition('ea.uid', $user->uid);
+  $innerQuery->execute();
+
+  $query = db_select('commerce_product', 'cp');
+  $query->addJoin('LEFT OUTER', $innerQuery, 'ea', 'ea.product = cp.product_id');
+  $query->leftjoin('commerce_product_type', 'cpt', 'cpt.type = cp.type');
+  $query->leftjoin('field_data_commerce_price', 'fdcp', 'fdcp.entity_id = cp.product_id');
+  $query->leftjoin('field_data_catalog_findit', 'fdcf', 'fdcf.entity_id = cp.product_id');
+  $query->leftjoin('taxonomy_term_data', 'ttd', 'ttd.tid = fdcf.catalog_findit_tid');
+  $query->fields('cp', array('product_id', 'title', 'sku'));
+  $query->fields('cpt', array('name'));
+  $query->fields('ttd', array('name'));
+  $query->fields('fdcp', array('commerce_price_amount', 'commerce_price_currency_code'));
+  $query->fields('ea');
+  if (count($product_ids) > 0) {
+    $query->condition('cp.product_id', $product_ids, 'IN');
+  }
+//    } else {
+//      $query->range(0, 2000);
+//    }
+
+  switch ($type) {
+    case 'all' :
+      $query->condition('ea.archive', 0);
+      break;
+    case 'deplete' :
+      $query->where('ea.stock <= ea.stock_low_limit_notification');
+      break;
+    case 'archive' :
+      $query->condition('ea.archive', 1);
+      break;
+  }
+
+  $query->orderBy($sort_order_field['field'], $sort_order);
+  $query->orderBy('cp.sku', $sort_order);
+
+  $tmp = $query->execute();
+
+  while ($row = $tmp->fetchAssoc()) {
+    $variation = _findit_merchant_get_product_variation_by_product_id($row['product_id']);
+    $variation['size'] = isset($variation['size']) && $variation['size'] != '' ? $variation['size'] : '--';
+    $variation['color'] = isset($variation['color']) && $variation['color'] != '' ? $variation['color'] : '--';
+
+    $notes = $row['note'] != '' ? explode('||', $row['note']) : '';
+    $color = !empty($variation['color']) ? str_replace(',', '', $variation['color']) : '';
+    $data[$row['product_id']] = array('sku' => $row['sku'],
+      'active' => !empty($row['status']) ? 'YES' : 'NO',
+      'stock_limit_notification' => ($row['stock_low_limit_notification'] > 0) ? $row['stock_low_limit_notification'] : 0,
+      'stock' => ($row['stock'] > 0) ? $row['stock'] : 0,
+      'seller_price' => ($row['price'] > 0) ? $row['price'] : ($row['commerce_price_amount'] / 100),
+      'return' => !empty($row['returnable']) ? 'YES' : 'NO',
+      'giftwrap' => !empty($row['gift_wrap']) ? 'YES' : 'NO',
+      'note_1' => isset($notes[0]) ? 'YES' : 'NO',
+      'note_2' => isset($notes[1]) ? 'YES' : 'NO',
+      'note_3' => isset($notes[2]) ? 'YES' : 'NO',
+    );
+    $association_batch[] = array('_findit_association_export_job_batch_process', array($data[$row['product_id']], $dataTxt, $filetype, $store_id));
+  }
+
+  $batch = array(
+    'operations' => $association_batch,
+    'finished' => '_findit_association_export_job_batch_finished',
+    'title' => t('Processing association export job...'),
+    'init_message' => t('Export batch is starting.'),
+    'progress_message' => t('Processed @current out of @total'),
+  );
+  batch_set($batch);
+  batch_process('merchant/' . $store_id . '/inventory/all');
+}
+
+/**
+ * Callback function to set export associations data.
+ */
+/*
+  function findit_association_download_all_association($data, $header, $store_id = '', $filetype) {
+  global $user;
+  set_time_limit(0);
+  if (empty($store_id)) {
+  $merchant_ids = findit_me_get_store_id_by_uid($user->uid);
+  $store_id = $merchant_ids[0]->store_id;
+  }
+  $association_batch = array();
+  foreach ($data as $key => $val) {
+  $association_batch[] = array('_findit_association_export_job_batch_process', array($val, $header, $filetype));
+  }
+
+  $batch = array(
+  'operations' => $association_batch,
+  'finished' => '_findit_association_export_job_batch_finished',
+  'title' => t('Processing association export job...'),
+  'init_message' => t('Export batch is starting.'),
+  'progress_message' => t('Processed @current out of @total'),
+  );
+  batch_set($batch);
+  batch_process('merchant/' . $store_id . '/inventory/all');
+  } */
+
+/**
+ * Callback function to process association export job.
+ */
+function _findit_association_export_job_batch_process($products, $header, $filetype, $store_id, &$context) {
+
+  // Set Conetnt Header data if not set.
+  if (!isset($context['results']['filetype']) && empty($context['results']['filetype'])) {
+    $context['results']['filetype'] = $filetype;
+  }
+
+  // Set Conetnt store id if not set.
+  if (!isset($context['results']['store_id']) || ($context['results']['store_id'] != $store_id)) {
+    $context['results']['store_id'] = $store_id;
+  }
+
+  // Set Conetnt Header data if not set.
+  if (!isset($context['results']['header']) && empty($context['results']['header'])) {
+    $context['results']['header'] = $header;
+  }
+
+  // Count Total row.
+  if (!isset($context['results']['count'])) {
+    $context['results']['count'] = 1;
+  }
+  else {
+    $context['results']['count'] ++;
+  }
+
+  // Get data row.
+  $data = implode("\t", array_values($products)) . "\r\n";
+  $context['results']['association_data'][$store_id][$context['results']['count']] = $data;
+}
+
+/**
+ * Callback function to finish the export job.
+ */
+function _findit_association_export_job_batch_finished($success, $results, $operations) {
+  if ($success) {
+    $filetype = $results['filetype'];
+    $data = $results['header'];
+    $store_id = $results['store_id'];
+    $data .= implode("", array_values($results['association_data'][$store_id]));
+    $_SESSION['association_data_' . $store_id] = $data;
+    unset($_SESSION[ASSO_SESS]);
+    drupal_set_message(t('Association have been exported sucessfully.') . l(t('Get the downloaded file'), 'merchant/inventory/download', array('html' => TRUE, 'query' => array('filetype' => $filetype, 'store_id' => $store_id))));
+  }
+  else {
+    drupal_set_message(t('Association have not been exported properly.'), 'error');
+  }
+}
+
+/**
+ * Callback function to set import associations data.
+ */
+function findit_association_bulk_upload_build_batch($filepath, $extra_data, $store) {
+  set_time_limit(0);
+  $association_batch = array();
+  if ($filepath) {
+    $handle = fopen($filepath, 'r');
+    if ($handle) {
+      //Read header of csv
+      $row = fgetcsv($handle);
+
+      while ($row = fgetcsv($handle, 0, "\t")) {
+        if (!empty($row[0]) && (stripos($row[0], 'sku') === FALSE) && (substr($row[0], 0, 1) != ',')) {
+          if (!is_array($row[0]) && (strpos($row[0], ',') !== FALSE)) {
+            $row_data = explode(',', $row[0]);
+          }
+          else {
+            $row_data = $row;
+          }
+
+          $value = array_merge($row_data, $extra_data[$row_data[0]]);
+          // $associations[$row_data[0]] = $row_data;
+          //foreach ($association_data as $key => $value) {
+          $association['id'] = $value['id'];
+          $association['title'] = 'Association_product_' . $value['sku'] . '_store_' . $store->store_id;
+          $association['status'] = ($value[1] == 'YES' ? 1 : 0);
+          $association['product_id'] = $value['product_id'];
+          $association['stock_low_limit_notification'] = $value[2];
+          $association['stock'] = $value[3];
+          $association['price'] = $value[4];
+          $association['returnable'] = ($value[5] == 'YES' ? 1 : 0);
+          $association['gift_wrap'] = ($value[6] == 'YES' ? 1 : 0);
+
+          if ($value[7] == 'YES')
+            $value['note'][0] = $_SESSION['seller_additional_notes']['note_0'];
+          if ($value[8] == 'YES')
+            $value['note'][1] = $_SESSION['seller_additional_notes']['note_1'];
+          if ($value[9] == 'YES')
+            $value['note'][2] = $_SESSION['seller_additional_notes']['note_2'];
+
+          $association['note'] = isset($value['note']) ? implode('||', $value['note']) : '';
+          $association['store_id'] = $store->store_id;
+          $association['unique_store_id'] = $store->unique_store_id;
+          $association['sku'] = $value['sku'];
+          $association['tid'] = $value['tid'];
+          $association['statusbyadmin'] = 1;
+          $association['sync_stage'] = 1;
+
+          $association_batch[] = array('findit_association_bulk_upload_batch_process', array($association));
+        }
+      }
+
+      $batch = array(
+        'operations' => $association_batch,
+        'finished' => '_findit_association_bulk_upload_batch_finished',
+        'title' => t('Processing association import job...'),
+        'init_message' => t('Import batch is starting.'),
+        'progress_message' => t('Processed @current out of @total'),
+      );
+      batch_set($batch);
+    }
+  }
+}
+
+/**
+ * Callback function to process association import job.
+ */
+function findit_association_bulk_upload_batch_process($association, &$context) {
+
+  try {
+    $entity = null;
+    if (isset($association['id']) && $association['id'] > 0) {
+      $entity = eckentity_load($association['id'], 'association');
+    }
+    else {
+      $entity = entity_create('association', array('type' => 'association'));
+    }
+
+    $wrapper = entity_metadata_wrapper('association', $entity);
+    $wrapper->title->set($association['title']);
+    $wrapper->status->set($association['status']);
+    $wrapper->price->set($association['price']); // As commerce stores price in cents.
+    $wrapper->product->set($association['product_id']);
+    $wrapper->stock_low_limit_notification->set($association['stock_low_limit_notification']);
+    $wrapper->stock->set($association['stock']);
+
+    $wrapper->returnable->set($association['returnable']);
+    $wrapper->gift_wrap->set($association['gift_wrap']);
+
+    $wrapper->note->set($association['note']);
+    $wrapper->store->set($association['store_id']);
+    $wrapper->unique_store_id->set($association['unique_store_id']);
+    $wrapper->sku->set($association['sku']);
+    $wrapper->tid->set($association['tid']);
+    $wrapper->statusbyadmin->set($association['statusbyadmin']);
+    $wrapper->sync_stage->set($association['sync_stage']);
+    $wrapper->changed->set(time());
+    $wrapper->save();
+  }
+  catch (Exception $e) {
+    drupal_set_message(t('Error in  association saving please try again !!!'), 'error');
+  }
+}
+
+/**
+ * Callback function to finish the import job.
+ */
+function _findit_association_bulk_upload_batch_finished($success, $results, $operations) {
+  if ($success) {
+    drupal_set_message(t('Items Successfully added to inventory list'));
+  }
+  else {
+    drupal_set_message(t('Error in  association saving please try !!!'), 'error');
+  }
+  cache_clear_all();
+}
+
+function _findit_association_get_sort_field($type = 'Item Details') {
+  switch ($type) {
+    case 'Item Details' :
+      $return = array('field' => 'cp.title');
+      break;
+    case 'MRP' :
+      $return = array('field' => 'fdcp.commerce_price_amount');
+      break;
+    case 'Seller' :
+      $return = array('field' => 'ea.price');
+      break;
+    case 'Current' :
+      $return = array('field' => 'ea.stock');
+      break;
+    case 'Active' :
+      $return = array('field' => 'ea.status');
+      break;
+    case 'Limit' :
+      $return = array('field' => 'ea.stock_low_limit_notification');
+      break;
+    case 'id' :
+      $return = array('field' => 'ea.id');
+      break;
+  }
+  return $return;
+}
+

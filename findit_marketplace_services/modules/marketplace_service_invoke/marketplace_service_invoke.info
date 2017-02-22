@@ -1,0 +1,7 @@
+name = "FindIT Services Invoke"
+description = "This module Invoke data and process it accordingly"
+core = "7.x"
+package = "Findit Custom API Modules"
+version = "7.x-1.x"
+
+dependencies[] = commerce

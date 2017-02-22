@@ -1,0 +1,68 @@
+<?php
+
+/**
+ * Implements hook_menu()
+ */
+function findit_marketplace_services_menu() {
+  $items = array();
+  $items['admin/config/service-settings'] = array(
+    'title' => t('Services settings'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('findit_marketplace_services_settings'),
+    'access callback' => TRUE,
+    'file' => 'findit_marketplace_services.admin.inc',
+  );
+  $items['findit-delete-url/%'] = array(
+    'title' => t('Delete service url'),
+    'page callback' => 'findit_marketplace_services_delete_url',
+    'page arguments' => array(1),
+    'access callback' => TRUE,
+  );
+
+  return $items;
+}
+
+/**
+ * 
+ * @param type $service_key
+ */
+function findit_marketplace_services_delete_url($service_key) {
+  global $base_url;
+  $num_deleted = db_delete('findit_marketplace_services_settings')
+    ->condition('service_name', $service_key)
+    ->execute();
+  drupal_set_message(t("Service URL deleted!"));
+  $path = $base_url . '/admin/config/service-settings';
+  drupal_goto($path);
+}
+
+/**
+ * Implements hook_commerce_akeneo_migrate_product_prepare_row()
+ */
+function findit_marketplace_services_commerce_akeneo_migrate_product_prepare_row($row) {
+  if (!empty($row->values)) {
+    $product = _get_product_id_from_sku($row->sku);
+    if (empty($product)) {
+      $row->status = 0;
+    }
+    // Get the color code from akeneo color name.
+    $color = $row->values['akeneo_maincolor'][LANGUAGE_NONE][0]['value'];
+    $row->field_product_color_code = _findit_product_colors_get_color_code($color);
+
+    $row->commerce_price_value = $row->values['price'][LANGUAGE_NONE][0]['amount'];
+    $row->commerce_price_currency_code = commerce_default_currency();
+    unset($row->values['title']['und']);
+    foreach ($row->values as $key => $field) {
+      if ($row->values[$key][LANGUAGE_NONE][0]['type'] == 'pim_catalog_image') {
+        $row->values[$key][LANGUAGE_NONE][0]['type'] = 'pim_catalog_text';
+        $row->values[$key][LANGUAGE_NONE][0]['value'] = $row->values[$key][LANGUAGE_NONE][0]['filename'];
+        unset($row->values[$key][LANGUAGE_NONE][0]['filename_original']);
+        unset($row->values[$key][LANGUAGE_NONE][0]['mimetype']);
+        unset($row->values[$key][LANGUAGE_NONE][0]['attribute_id']);
+        unset($row->values[$key][LANGUAGE_NONE][0]['media_id']);
+        unset($row->values[$key][LANGUAGE_NONE][0]['rest_url']);
+        unset($row->values[$key][LANGUAGE_NONE][0]['filename']);
+      }
+    }
+  }
+}

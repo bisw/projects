@@ -1,0 +1,28 @@
+<?php
+
+/**
+ * Implements hook_schema().
+ */
+function findit_reply_schema() {
+  $schema['reply_extra_info'] = array(
+    'description' => t('Contain reply extra information like deleted date and deleted by'),
+    'fields' => array(
+      'rid' => array(
+        'description' => 'contain reply id',
+        'type' => 'int',
+        ),
+      'deleted_date' => array(
+        'description' => 'reply deleted date information',
+        'type' => 'int'
+        ),
+      'deleted_by' => array(
+        'description' => 'reply deleted by information',
+        'type' => 'int',
+        ),
+      ),
+    'indexes' => array(
+      'rid' => array('rid'),
+      ),
+  );
+  return $schema;
+}

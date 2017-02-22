@@ -1,0 +1,326 @@
+<?php
+
+/**
+ * @file
+ *  Module file for inventory rules for products.
+ */
+
+/**
+ * Implements hook_entity_info.
+ */
+function findit_inventory_rules_products_entity_info() {
+  return array(
+    'findit_product_inventory_rule' => array(
+      'label' => t('Findit Products Inventory Rule'),
+      'base table' => 'findit_products_inventory_rule',
+      'revision table' => 'findit_products_inventory_rule_revision',
+      'controller class' => 'EntityAPIController',
+      'entity keys' => array(
+        'id' => 'id',
+        'revision' => 'vid',
+      ),
+      'load hook' => 'findit_products_inventory_rule_load',
+    ),
+  );
+}
+
+/**
+ * Implements hook_menu()
+ */
+function findit_inventory_rules_products_menu() {
+  $items = array();
+  $items['create/inventory-rule-product'] = array(
+    'title' => 'Enter Inventory Rule For Product',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('findit_inventory_rule_product_form'),
+    'access arguments' => array('manage inventory rule for products'),
+    'file' => 'includes/findit_inventory_rules_products.inc',
+  );
+  $items['inventory-rule-product/%/edit'] = array(
+    'title' => 'Edit Inventory Rule For Product',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('findit_inventory_rule_product_form', 1),
+    'access arguments' => array('manage inventory rule for products'),
+    'file' => 'includes/findit_inventory_rules_products.inc',
+  );
+  $items['inventory-rule-product'] = array(
+    'title' => 'List of Inventory Rules for Products',
+    'page callback' => 'findit_inventory_rules_products_list',
+    'access arguments' => array('manage inventory rule for products'),
+    'file' => 'includes/findit_inventory_rules_products.inc',
+  );
+  $items['inventory-rule-product/%/delete'] = array(
+    'title' => 'Delete Inventory Rule for Product',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('findit_inventory_rule_product_delete_form', 1),
+    'access arguments' => array('manage inventory rule for products'),
+    'file' => 'includes/findit_inventory_rules_products.inc',
+  );
+  return $items;
+}
+
+/**
+ * 
+ * 
+ */
+function findit_inventory_rules_products_permission() {
+  return array(
+    'manage inventory rule for products' => array(
+      'title' => t('Manage Inventory rules for Products'),
+      'description' => t('Manage Inventory rules for Products'),
+    ),
+  );
+}
+
+/**
+ * Returns an initialized findit_product_inventory_rule object.
+ * Used to create an entity of type findit_product_inventory_rule.
+ */
+function findit_inventory_rules_products_initialize() {
+  return entity_get_controller('findit_product_inventory_rule')->create();
+}
+
+/**
+ * Implements of hook_cron_queue_info().
+ */
+function findit_inventory_rules_products_cron_queue_info() {
+  // This is the callback function for each queue item.
+  // This is the max run time per cron run in seconds.
+  $queues['skus_soft_limit'] = array(
+    'worker callback' => 'skus_soft_limit_email',
+    'skip on cron' => TRUE,
+    'time' => 1500,
+  );
+  $queues['skus_hard_limit'] = array(
+    'worker callback' => 'skus_hard_limit_email',
+    'skip on cron' => TRUE,
+    'time' => 1500,
+  );
+  return $queues;
+}
+
+/**
+ * Implements hook_cronapi.
+ */
+function findit_inventory_rules_products_cronapi($op, $job = NULL) {
+  $items['inventory_sku_soft_limit_email'] = array(
+    'description' => 'Send mail for inventory for sku soft limit reached.',
+    'rule' => '59 23 * * *', // Daily.
+  );
+  $items['inventory_sku_hard_limit_email'] = array(
+    'description' => 'Send mail for inventory for sku hard limit reached.',
+    'rule' => '59 23 * * *', // Daily.
+  );
+  return $items;
+}
+
+/**
+ * Callback function for inventory going below soft limit email.
+ */
+function inventory_sku_soft_limit_email() {
+  // Put everything in a queue for processing.
+  $queue = DrupalQueue::get('skus_soft_limit');
+  // Get all skus for which inventory caps are set.
+  $skus_data = findit_get_skus_inventory_cap();
+  foreach ($skus_data as $sku_data) {
+    $queue->createItem($sku_data);
+  }
+
+  // Grab the defined cron queues.
+  $queues = module_invoke_all('cron_queue_info');
+  drupal_alter('cron_queue_info', $queues);
+  $info = $queues['skus_soft_limit'];
+  $function = $info['worker callback'];
+  $end = time() + (isset($info['time']) ? $info['time'] : 15);
+  $queue = DrupalQueue::get('skus_soft_limit');
+  while (time() < $end && ($item = $queue->claimItem())) {
+    $function($item->data);
+    $queue->deleteItem($item);
+  }
+}
+
+/**
+ * Function for sending soft limit depletion email for sku.
+ */
+function skus_soft_limit_email($sku_data) {
+  $from = variable_get('site_mail', ini_get('sendmail_from'));
+  $pet = pet_load('inventory_soft_limit_for_sku');
+  $params = array();
+  $params['pet_from'] = $from;
+  $inventory_count = findit_sku_inventory_count($sku_data->sku, $sku_data->soft_limit);
+  if (!empty($inventory_count)) {
+    $email_ids = findit_inventory_get_email_ids_of_group($sku_data->email_group);
+    $params['pet_to'] = implode(',', $email_ids);
+    $params['products_sku'] = $sku_data->sku;
+    $params['sku_soft_limit'] = $sku_data->soft_limit;
+    $params['sku_hard_limit'] = $sku_data->hard_limit;
+    // Send e-mail.
+    pet_send_one_mail($pet, $params);
+  }
+}
+
+
+/**
+ * Callback function for inventory going below hard limit email.
+ */
+function inventory_sku_hard_limit_email() {
+  // Put everything in a queue for processing.
+  $queue = DrupalQueue::get('skus_hard_limit');
+  // Get all skus for which inventory caps are set.
+  $skus_data = findit_get_skus_inventory_cap();
+  foreach ($skus_data as $sku_data) {
+    $queue->createItem($sku_data);
+  }
+
+  // Grab the defined cron queues.
+  $queues = module_invoke_all('cron_queue_info');
+  drupal_alter('cron_queue_info', $queues);
+  $info = $queues['skus_hard_limit'];
+  $function = $info['worker callback'];
+  $end = time() + (isset($info['time']) ? $info['time'] : 15);
+  $queue = DrupalQueue::get('skus_hard_limit');
+  while (time() < $end && ($item = $queue->claimItem())) {
+    $function($item->data);
+    $queue->deleteItem($item);
+  }
+}
+
+/**
+ * * Function for sending hard limit depletion email for sku.
+ */
+function skus_hard_limit_email($sku_data) {
+  $from = variable_get('site_mail', ini_get('sendmail_from'));
+  $pet = pet_load('inventory_hard_limit_for_sku');
+  $params = array();
+  $params['pet_from'] = $from;
+  $inventory_count = findit_sku_inventory_count($sku_data->sku, $sku_data->hard_limit);
+  if (!empty($inventory_count)) {
+    $email_ids = findit_inventory_get_email_ids_of_group($sku_data->email_group);
+    $params['pet_to'] = implode(',', $email_ids);
+    $params['products_sku'] = $sku_data->sku;
+    $params['sku_soft_limit'] = $sku_data->soft_limit;
+    $params['sku_hard_limit'] = $sku_data->hard_limit;
+    // Send e-mail.
+    pet_send_one_mail($pet, $params);
+  }
+}
+
+/**
+ * Function for getting inventory count of the sku.
+ */
+function findit_sku_inventory_count($sku, $limit) {
+  // Query for getting summary of products inventory for a category.
+  $query = db_select('eck_association');
+  $query->condition('sku', $sku);
+  $query->condition('status', 1);
+  $query->addExpression('SUM(stock)', 'stock');
+  $query->groupBy('sku');
+  $query->havingCondition('stock', $limit, '<=');
+  $result = $query->execute()->fetchAll();
+  return $result;
+}
+
+/**
+ * Function for getting list of skus inventory cap is set.
+ */
+function findit_get_skus_inventory_cap() {
+  $query = db_select('findit_products_inventory_rule');
+  $query->fields('findit_products_inventory_rule', array('sku', 'soft_limit', 'hard_limit', 'email_group'));
+  return $query->execute()->fetchAll();
+}
+
+/**
+ * Implements hook_token_info.
+ */
+function findit_inventory_rules_products_token_info() {
+  $info = array();
+  $info['types']['inventory_rules_sku'] = array(
+    'name' => t('Inventory Rules SKU'),
+    'description' => t('Tokens related to inventory rules for SKUs.'),
+  );
+  // Token for pending orders table.
+  $info['tokens']['inventory_rules_sku']['product_name'] = array(
+    'name' => t('Product name'),
+    'description' => t('Names of the product for which has reached soft or hard limit.'),
+  );
+  $info['tokens']['inventory_rules_sku']['sku_soft_limit'] = array(
+    'name' => t('SKU soft limit'),
+    'description' => t('Soft limit that is set on the SKU.'),
+  );
+  $info['tokens']['inventory_rules_sku']['sku_hard_limit'] = array(
+    'name' => t('SKU hard limit'),
+    'description' => t('Hard limit that is set on the SKU.'),
+  );
+  $info['tokens']['inventory_rules_sku']['products_sku'] = array(
+    'name' => t('SKU of the product'),
+    'description' => t('SKU of the product for which has reached soft or hard limit.'),
+  );
+  $info['tokens']['inventory_rules_sku']['sku_inventory_left'] = array(
+    'name' => t('Inventory left for the SKU'),
+    'description' => t('Left inventory of the SKU.'),
+  );
+  return $info;
+}
+
+/**
+ * Implements hook_pet_substitutions_alter().
+ */
+function findit_inventory_rules_products_pet_substitutions_alter(&$substitutions, $params) {
+  $substitutions['products-sku'] = $params['products_sku'];
+  $substitutions['sku-soft-limit'] = $params['sku_soft_limit'];
+  $substitutions['sku-hard-limit'] = $params['sku_hard_limit'];
+}
+
+/**
+ * Implements hook_tokens.
+ */
+function findit_inventory_rules_products_tokens($type, $tokens, array $data = array()) {
+  $replacements = array();
+  if ($type == 'inventory_rules_sku') {
+    foreach ($tokens as $name => $original) {
+      // Simple key values in variables.
+      if ($name == 'product_name') {
+        // Replace token with summary of skus with remaining stock.
+        $replacements [$original] = _get_product_title_from_sku($data['products-sku']);
+      }
+      if ($name == 'sku_soft_limit') {
+        $replacements [$original] = $data['sku-soft-limit'];
+      }
+      elseif ($name == 'sku_hard_limit') {
+        $replacements [$original] = $data['sku-hard-limit'];
+      }
+      elseif ($name == 'products_sku') {
+        $replacements [$original] = $data['products-sku'];
+      }
+      elseif ($name == 'sku_inventory_left') {
+        $replacements [$original] = _findit_get_inventory_left_for_sku($data['products-sku']);
+      }
+    }
+  }
+  return $replacements;
+}
+
+/**
+ * Function for getting product title from sku.
+ */
+function _get_product_title_from_sku($sku) {
+  $query = db_select('commerce_product');
+  $query->fields('commerce_product', array('title'));
+  $query->condition('sku', $sku);
+  $result = $query->execute()->fetchAssoc();
+  return $result['title'];
+}
+
+/**
+ * Function for getting inventory left for SKU.
+ */
+function _findit_get_inventory_left_for_sku($sku) {
+  // Query for getting summary of products inventory for a category.
+  $query = db_select('eck_association');
+  $query->condition('sku', $sku);
+  $query->condition('status', 1);
+  $query->addExpression('SUM(stock)', 'stock');
+  $query->groupBy('sku');
+  $result = $query->execute()->fetchAssoc();
+  return $result['stock'];
+}

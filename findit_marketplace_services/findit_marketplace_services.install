@@ -1,0 +1,30 @@
+<?php
+
+/**
+ * Implements hook_schema()
+ */
+function findit_marketplace_services_schema() {
+  $schema = array();
+  $schema['findit_services_settings'] = array(
+    'description' => t('Table for storing findit services settings'),
+    'fields' => array(
+      'service_name' => array(
+        'type' => 'varchar',
+        'length' => 128,
+        'not null' => TRUE,
+        'default' => '',
+        'description' => t('Name of the service'),
+      ),
+      'service_url' => array(
+        'type' => 'varchar',
+        'length' => 128,
+        'not null' => TRUE,
+        'default' => '',
+        'description' => t('Url of the service'),
+      ),
+    ),
+    'primary key' => array('service_name'),
+  );
+  
+  return $schema;
+}
