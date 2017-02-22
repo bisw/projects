@@ -1,0 +1,124 @@
+<?php
+
+/**
+ * Implements hook_requirements().
+ */
+function yt_migration_requirements($phase) {
+  $requirements = array();
+  $t = get_t();
+  switch ($phase) {
+    case 'install':
+    case 'runtime':
+      // Check that the Drupal 6 db is loaded
+      $sample_setting = '<pre>
+$conf[\'drupal6_db\'] = array(
+\'database\' => \'drupal6_db_name\',
+\'username\' => \'drupal6_db_username\',
+\'password\' => \'drupal6_db_password\',
+\'host\' => \'localhost\',
+);
+</pre>';
+      // Check that there is an Drupal6 database configured for use
+      $requirements['drupal6_db'] = array('title' => $t('Drupal6 Database configuration'));
+      $requirements['drupal6_db']['description'] = $t('Drupal 6 db settings is available in settings.php file.');
+      global $conf;
+      if (empty($conf['drupal6_db']) || empty($conf['drupal6_db']['username']) ||
+          empty($conf['drupal6_db']['password']) || empty($conf['drupal6_db']['database'])) {
+        $requirements['drupal6_db']['description'] = $t('You must define $conf[\'drupal6_db\']
+          (in your site\'s settings.php file) to point to the drupal6 database where
+          you want to migrate drupal 6 data to drupal 7: ' . $sample_setting);
+        $requirements['drupal6_db']['severity'] = REQUIREMENT_ERROR;
+        break;
+      }
+
+      // Check that we can connect to the Drupal6 db.
+      $requirements['drupal6_db_connect'] = array('title' => $t('Drupal6 connection available'));
+      $requirements['drupal6_db_connect']['description'] = $t('Drupal 6 Connection is available.');
+      $host = $conf['drupal6_db']['host'];
+      $user = $conf['drupal6_db']['username'];
+      $password = $conf['drupal6_db']['password'];
+      $db_name = $conf['drupal6_db']['database'];
+      $connection = mysql_connect($host, $user, $password);
+      if (!$connection) {
+        $e = mysql_error();
+        $requirements['drupal6_db_connect']['description'] = $t('Could not connect to configured
+          Drupal6 database with details Username: !user, Password: !password. Drupal6 database error message: !message', array('!user' => $conf['drupal6_db']['username'], '!password' => $conf['drupal6_db']['password'],
+          '!message' => $e['message']));
+        $requirements['drupal6_db_connect']['severity'] = REQUIREMENT_ERROR;
+        break;
+      }
+
+      // Check drupal6 db exists
+      $requirements['drupal6_db_name'] = array('title' => $t('Drupal6 database available'));
+      $requirements['drupal6_db_connect']['description'] = $t('Drupal 6 database is available.');
+      $db_selected = mysql_select_db($db_name, $connection);
+      if (!$db_selected) {
+        $e = mysql_error();
+        $requirements['drupal6_db_name']['description'] = $t('Could not find
+          Drupal6 database name !db_name. Drupal6 database error message: !message', array('!db_name' => $conf['drupal6_db']['database'],
+          '!message' => $e['message']));
+        $requirements['drupal6_db_name']['severity'] = REQUIREMENT_ERROR;
+        break;
+      }
+
+      // Check for necessary privileges
+      $requirements['drupal6_db_privs'] = array('title' => $t('Necessary drupal6 privileges are assigned'));
+      $requirements['drupal6_db_privs']['description'] = $t('Necessary drupal6 privileges is working properly.');
+      $statement = mysql_query('SELECT * FROM users', $connection);
+      if (!$statement) {
+        $e = mysql_error($connection);
+        $requirements['drupal6_db_privs']['description'] = $e['message'];
+        $requirements['drupal6_db_privs']['severity'] = REQUIREMENT_ERROR;
+        break;
+      }
+      $result = mysql_fetch_object($statement);
+      if (!$result) {
+        $e = mysql_error($statement);
+        $requirements['drupal6_db_privs']['description'] = $e['message'];
+        $requirements['drupal6_db_privs']['severity'] = REQUIREMENT_ERROR;
+        break;
+      }
+      break;
+    case 'update':
+      break;
+  }
+  return $requirements;
+}
+
+/**
+ * Truncate the taxonomy tables for migration
+ * We are retaining the drupal6 tids on migration
+ */
+function yt_migration_update_7001() {
+  $return = array();
+//  db_truncate('taxonomy_term_data')->execute();
+//  db_truncate('taxonomy_term_hierarchy')->execute();
+  return $return;
+}
+
+/**
+ * Truncate the files tables for migration
+ * We are retaining the drupal6 fids on migration
+ */
+function yt_migration_update_7002() {
+  $return = array();
+//  db_truncate('file_managed')->execute();
+//  db_truncate('file_metadata')->execute();
+  return $return;
+}
+
+/**
+ * Truncate the files tables for migration
+ * We are retaining the drupal6 fids on migration
+ */
+function yt_migration_update_7003() {
+  $return = array();
+//  $query = db_select('node', 'n');
+//  $query->fields('n', array('nid'));
+//  $result = $query->execute()
+//          ->fetchAll();
+//  foreach ($result as $id => $nid) {
+//    entity_delete('node', $nid->nid);
+//  }
+  return $return;
+}

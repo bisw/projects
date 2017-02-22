@@ -1,0 +1,35 @@
+name = YourTango Migration
+description = This module used to migrate the user and content from d6 to d7
+core = 7.x
+package = YourTango Migration
+version = 7.x-1.0
+
+dependencies[] = migrate
+dependencies[] = migrate_extras
+dependencies[] = migrate_ui
+dependencies[] = migrate_d2d
+dependencies[] = migrate_d2d_ui
+
+files[] = includes/author.inc
+files[] = includes/blog.inc
+files[] = includes/embbed_video.inc
+files[] = includes/fact_of_love.inc
+files[] = includes/feature.inc
+files[] = includes/gallery.inc
+files[] = includes/list.inc
+files[] = includes/page.inc
+files[] = includes/partner_link.inc
+;files[] = includes/proconnect.inc
+files[] = includes/proconnect_ss.inc
+files[] = includes/resource.inc
+;files[] = includes/file.inc
+files[] = includes/taxonomy.inc
+files[] = includes/gallery_image.inc
+files[] = includes/pending_users.inc
+files[] = includes/pending_users_profiles.inc
+files[] = includes/user.inc
+files[] = includes/external_article.inc
+files[] = includes/privatemessage.inc
+files[] = includes/vanity_url.inc
+files[] = includes/redirect.inc
+;files[] = includes/file-table-migration.inc
